@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     def _strip_session_secret(cls, value: str) -> str:
         return value.strip()
 
+    @field_validator("unclassified_max_upstream_pages")
+    @classmethod
+    def _positive_upstream_pages(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("UNCLASSIFIED_MAX_UPSTREAM_PAGES must be >= 1")
+        return value
+
     @model_validator(mode="after")
     def _validate_production_session(self) -> Settings:
         if self.atlasdocs_env == "production":

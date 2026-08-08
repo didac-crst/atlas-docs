@@ -384,6 +384,7 @@ def test_delete_relationship(client: TestClient) -> None:
 
 def test_relationship_types_and_concepts(client: TestClient) -> None:
     assert client.get("/relationship-types").status_code == 401
+    assert client.get("/ontologies/country/concepts").status_code == 401
     types = client.get("/relationship-types", headers=AUTH)
     assert types.status_code == 200
     codes = {item["code"] for item in types.json()}

@@ -81,20 +81,24 @@ class PaperlessClient:
         except ValueError as exc:
             raise PaperlessUnavailableError("Paperless returned non-JSON response") from exc
 
+    def _document_from_payload(self, payload: object) -> PaperlessDocument:
+        if not isinstance(payload, dict):
+            raise PaperlessUnavailableError("Paperless returned malformed document payload")
+        if "id" not in payload:
+            raise PaperlessUnavailableError("Paperless document payload missing id")
+        title = payload.get("title")
+        if title is not None and not isinstance(title, str):
+            raise PaperlessUnavailableError("Paperless document payload has invalid title")
+        try:
+            return PaperlessDocument(id=int(payload["id"]), title=title)
+        except (TypeError, ValueError) as exc:
+            raise PaperlessUnavailableError("Paperless returned malformed document payload") from exc
+
     def get_document(self, document_id: int, token: str) -> PaperlessDocument:
         url = f"{self._base_url}/api/documents/{document_id}/"
         response = self._request("GET", url, token)
         self._raise_for_status(response, document_id)
-        payload = self._parse_json(response)
-        if not isinstance(payload, dict):
-            raise PaperlessUnavailableError("Paperless returned malformed document payload")
-        try:
-            return PaperlessDocument(
-                id=int(payload.get("id", document_id)),
-                title=payload.get("title"),
-            )
-        except (TypeError, ValueError) as exc:
-            raise PaperlessUnavailableError("Paperless returned malformed document payload") from exc
+        return self._document_from_payload(self._parse_json(response))
 
     def list_documents(self, token: str, *, page: int = 1, page_size: int = 25) -> PaperlessDocumentPage:
         url = f"{self._base_url}/api/documents/?page={page}&page_size={page_size}"
@@ -103,24 +107,26 @@ class PaperlessClient:
         payload = self._parse_json(response)
         if not isinstance(payload, dict):
             raise PaperlessUnavailableError("Paperless returned malformed document list")
+        if "results" not in payload:
+            raise PaperlessUnavailableError("Paperless document list missing results")
+        raw_results = payload["results"]
+        if not isinstance(raw_results, list):
+            raise PaperlessUnavailableError("Paperless document list has invalid results")
         try:
-            raw_results = payload.get("results", [])
-            if not isinstance(raw_results, list):
-                raise TypeError("results must be a list")
-            results = [
-                PaperlessDocument(id=int(item["id"]), title=item.get("title"))
-                for item in raw_results
-            ]
+            results = [self._document_from_payload(item) for item in raw_results]
+            count_raw = payload.get("count", len(results))
             return PaperlessDocumentPage(
-                count=int(payload.get("count", len(results))),
+                count=int(count_raw),
                 page=page,
                 page_size=page_size,
                 results=results,
                 has_next=bool(payload.get("next")),
                 has_previous=bool(payload.get("previous")),
             )
-        except (KeyError, TypeError, ValueError) as exc:
+        except (TypeError, ValueError) as exc:
             raise PaperlessUnavailableError("Paperless returned malformed document list") from exc
+        except PaperlessUnavailableError:
+            raise
 
     def document_exists(self, document_id: int, token: str) -> bool:
         self.get_document(document_id, token=token)

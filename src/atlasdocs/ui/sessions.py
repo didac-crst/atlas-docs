@@ -34,6 +34,8 @@ class InMemorySessionStore:
     """Process-local session store with explicit expiry, cap, and logout invalidation."""
 
     def __init__(self, max_sessions: int = MAX_UI_SESSIONS) -> None:
+        if max_sessions < 1:
+            raise ValueError("max_sessions must be >= 1")
         self._lock = threading.Lock()
         self._sessions: dict[str, UiSession] = {}
         self._max_sessions = max_sessions
@@ -80,10 +82,14 @@ class InMemorySessionStore:
                 return None
             return session
 
-    def save(self, session: UiSession) -> None:
+    def save(self, session: UiSession) -> bool:
+        """Update an existing session only. Returns False if the ID is unknown/deleted."""
         with self._lock:
             self._purge_expired_locked()
+            if session.id not in self._sessions:
+                return False
             self._sessions[session.id] = session
+            return True
 
     def delete(self, session_id: str | None) -> None:
         if not session_id:
@@ -91,10 +97,9 @@ class InMemorySessionStore:
         with self._lock:
             self._sessions.pop(session_id, None)
 
-    def rotate_csrf(self, session: UiSession) -> UiSession:
+    def rotate_csrf(self, session: UiSession) -> bool:
         session.csrf_token = secrets.token_urlsafe(32)
-        self.save(session)
-        return session
+        return self.save(session)
 
     def __len__(self) -> int:
         with self._lock:

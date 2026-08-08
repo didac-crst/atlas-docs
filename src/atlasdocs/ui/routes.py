@@ -268,7 +268,10 @@ def classify_document(
             token=ui_session.paperless_authorization,
         )
         notice = "Relationship saved"
-        session_store.rotate_csrf(ui_session)
+        if not session_store.rotate_csrf(ui_session):
+            response = RedirectResponse(url="/ui/connect", status_code=HTTP_303_SEE_OTHER)
+            clear_session_cookie(response)
+            return response
     except (ConflictError, ValidationError, ForbiddenDocumentError, NotFoundError, UpstreamError) as exc:
         notice = _error_message(exc)
 
@@ -295,7 +298,10 @@ def delete_relationship_form(
     try:
         service.delete_relationship(relationship_id, token=ui_session.paperless_authorization)
         notice = "Relationship removed"
-        session_store.rotate_csrf(ui_session)
+        if not session_store.rotate_csrf(ui_session):
+            response = RedirectResponse(url="/ui/connect", status_code=HTTP_303_SEE_OTHER)
+            clear_session_cookie(response)
+            return response
     except (ValidationError, ForbiddenDocumentError, NotFoundError, UpstreamError) as exc:
         notice = _error_message(exc)
 

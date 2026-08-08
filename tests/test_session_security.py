@@ -47,6 +47,11 @@ def test_production_cookie_secure_forced() -> None:
     assert settings.cookie_secure is True
 
 
+def test_rejects_non_positive_unclassified_max_upstream_pages() -> None:
+    with pytest.raises(ValidationError):
+        Settings(unclassified_max_upstream_pages=0)
+
+
 def test_development_allows_insecure_http_cookies() -> None:
     settings = Settings(
         atlasdocs_env="development",
@@ -68,3 +73,22 @@ def test_session_store_evicts_when_capped(monkeypatch: pytest.MonkeyPatch) -> No
     assert store.get(first.id) is None
     assert store.get(second.id) is not None
     assert store.get(third.id) is not None
+
+
+def test_session_store_rejects_non_positive_capacity() -> None:
+    from atlasdocs.ui.sessions import InMemorySessionStore
+
+    with pytest.raises(ValueError):
+        InMemorySessionStore(max_sessions=0)
+
+
+def test_session_save_does_not_resurrect_deleted_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    from atlasdocs.ui.sessions import InMemorySessionStore
+
+    monkeypatch.setenv("SESSION_MAX_AGE_SECONDS", "3600")
+    get_settings.cache_clear()
+    store = InMemorySessionStore(max_sessions=10)
+    session = store.create(paperless_authorization="Token secret")
+    store.delete(session.id)
+    assert store.rotate_csrf(session) is False
+    assert store.get(session.id) is None
