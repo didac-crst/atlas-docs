@@ -2,7 +2,7 @@
 
 ## Recommended placement
 
-Use `/srv/satellite/apps/AtlasDocs` as the planning root. When implementation starts, keep deployable components separate:
+Use `/srv/satellite/apps/atlas-docs` as the planning root. When implementation starts, keep deployable components separate:
 
 ```text
 /srv/satellite/apps/paperless-ngx
@@ -21,14 +21,14 @@ The current scaffold is documentation only. Do not create a Compose stack until 
 
 ## Storage boundary
 
-The existing `/home/didac/Scans` CIFS mount is not an adequate definition of the new system's storage boundary. Create and document dedicated NAS locations for:
+Dedicated NAS share: `//10.10.0.2/AtlasDocs` mounted at `/mnt/atlas-docs` (CIFS, `satellite` credentials). Pilot layout:
 
-- Paperless media/documents
-- Paperless export
-- isolated temporary consumption
-- read-only legacy source archive
+- `/mnt/atlas-docs/media` — Paperless media/documents
+- `/mnt/atlas-docs/export` — Paperless export
+- `/mnt/atlas-docs/consume` — isolated temporary consumption
+- Legacy source archive remains separate (read-only); never use it as the consumption directory
 
-Never use the legacy archive as the consumption directory and never allow the migrator to modify it. Keep PostgreSQL data on the local SSD-backed PostgreSQL service unless restore and performance tests prove otherwise; store large document media on NAS.
+Never allow the migrator to modify the legacy archive. Keep PostgreSQL data on the local SSD-backed PostgreSQL service unless restore and performance tests prove otherwise; store large document media on NAS. Local SSD also holds Paperless search index + Valkey under `/srv/satellite/data/paperless-ngx/`.
 
 ## Dependencies
 
@@ -61,4 +61,6 @@ OCR and conversion can be CPU- and memory-intensive. Start with the pilot, one o
 
 ## Decisions Cursor must not invent
 
-Leave explicit TODOs for real NAS paths, Paperless hostname, image versions, database and role names, Redis choice, admin account creation, backup retention and restore test, legacy archive path, semantic authentication, and multi-user permission requirements.
+Settled for pilot: NAS share `AtlasDocs` → `/mnt/atlas-docs`; DB `paperless` / role `paperless_app`; dedicated Valkey in Compose; LAN port `3040` (`3030` is scanner-profile-ui).
+
+Leave explicit TODOs for Cloudflare/Paperless hostname, image digests, admin account policy after first boot, backup retention and restore test for media, legacy archive path, semantic authentication, and multi-user permission requirements.

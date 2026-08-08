@@ -1,0 +1,95 @@
+# Paperless operational tag taxonomy (source of truth).
+# Semantic concepts (people, orgs, countries, cases, domains) belong in AtlasDocs — not here.
+#
+# Rules:
+# - hierarchical via Paperless parent tags
+# - human-readable leaf names (no acronym prefixes)
+# - lowercase, singular where natural, hyphens (no spaces)
+# - idempotent seeding by stable path (parent/leaf)
+#
+# Apply with:
+#   docker compose exec webserver python3 /usr/src/paperless/scripts/seed_tags.py
+
+version: 1
+
+# Optional palette keyed by root name (hex). Leaves inherit unless overridden.
+colors:
+  workflow: "#4C78A8"
+  action: "#F58518"
+  import: "#54A24B"
+  quality: "#E45756"
+  favorite: "#B279A2"
+  ai: "#72B7B2"
+  security: "#FF9DA6"
+  temporary: "#9D755D"
+
+roots:
+  - name: workflow
+    description: Document processing state in Paperless
+    children:
+      - name: inbox
+        is_inbox_tag: true
+        description: Newly consumed; not yet reviewed
+      - name: needs-review
+      - name: needs-classification
+      - name: needs-summary
+      - name: needs-ocr-check
+      - name: verified
+
+  - name: action
+    description: Human follow-up required
+    children:
+      - name: to-read
+      - name: to-sign
+      - name: to-pay
+      - name: to-send
+      - name: follow-up
+      - name: waiting-response
+      - name: urgent
+
+  - name: import
+    description: How the document entered Paperless
+    children:
+      - name: legacy
+      - name: scanner
+      - name: email
+      - name: api
+      - name: manual
+
+  - name: quality
+    description: Data-quality problems to fix
+    children:
+      - name: duplicate
+      - name: wrong-date
+      - name: wrong-title
+      - name: wrong-correspondent
+      - name: wrong-document-type
+      - name: missing-pages
+      - name: low-quality
+
+  - name: favorite
+    description: Personal markers (non-semantic)
+    children:
+      - name: starred
+      - name: reference
+
+  - name: ai
+    description: Automated enrichment state (future)
+    children:
+      - name: pending
+      - name: summarized
+      - name: embedded
+      - name: entities-extracted
+      - name: failed
+
+  - name: security
+    description: Access / retention markers in Paperless
+    children:
+      - name: confidential
+      - name: legal-hold
+
+  - name: temporary
+    description: Transient tags; safe to clean up
+    children:
+      - name: test
+      - name: delete

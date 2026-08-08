@@ -1,0 +1,55 @@
+# Paperless-ngx pilot on Satellite.
+# Non-secret config: ./paperless-ngx.env (git)
+# Secrets only: /srv/satellite/secrets/paperless-ngx.secret.env
+# Media/export/consume: NAS share AtlasDocs at /mnt/atlas-docs
+# Local SSD: search index + Valkey
+
+name: paperless-ngx
+
+services:
+  broker:
+    # TODO: pin digest after pilot acceptance.
+    image: docker.io/valkey/valkey:9-alpine
+    container_name: paperless-ngx-broker
+    restart: unless-stopped
+    volumes:
+      - /srv/satellite/data/paperless-ngx/redis:/data
+    networks:
+      - paperless-internal
+
+  webserver:
+    # TODO: pin digest after pilot acceptance.
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.0.5
+    container_name: paperless-ngx
+    restart: unless-stopped
+    depends_on:
+      - broker
+    env_file:
+      - ./paperless-ngx.env
+      - /srv/satellite/secrets/paperless-ngx.secret.env
+    environment:
+      PAPERLESS_REDIS: redis://broker:6379
+      PAPERLESS_DBENGINE: postgresql
+      # Shared Satellite Postgres on the external docker network.
+      PAPERLESS_DBHOST: satellite-postgres-timescale
+      PAPERLESS_DBPORT: "5432"
+    ports:
+      # Port-policy slot 30 = scanner / document pipeline.
+      # 3030 is used by scanner-profile-ui; Paperless uses 3040.
+      # Bind to LAN only; Cloudflare Tunnel provides HTTPS later.
+      - "10.10.0.12:3040:8000"
+    volumes:
+      - /srv/satellite/data/paperless-ngx/data:/usr/src/paperless/data
+      - /mnt/atlas-docs/media:/usr/src/paperless/media
+      - /mnt/atlas-docs/export:/usr/src/paperless/export
+      - /mnt/atlas-docs/consume:/usr/src/paperless/consume
+      - ./scripts:/usr/src/paperless/scripts:ro
+      - ../config/paperless:/usr/src/paperless/seeds:ro
+    networks:
+      - paperless-internal
+      - satellite-databases
+
+networks:
+  paperless-internal:
+  satellite-databases:
+    external: true

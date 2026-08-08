@@ -1,5 +1,18 @@
 .env
 *.env
+!*.env.example
+# Non-secret service config committed in-repo (secrets stay under /srv/satellite/secrets/)
+!paperless-ngx/paperless-ngx.env
 .DS_Store
 *.swp
 *~
+
+# Never commit rendered or copied secret files
+*.secret.env
+!*.secret.env.example
+
+# Local Paperless working dirs if someone runs compose from a checkout
+paperless-ngx/consume/
+paperless-ngx/export/
+paperless-ngx/media/
+paperless-ngx/data/
