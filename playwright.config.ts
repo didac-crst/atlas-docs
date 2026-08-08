@@ -1,7 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
+import { existsSync } from "node:fs";
 
 const PORT = 4173;
 const BASE = `http://127.0.0.1:${PORT}`;
+const python = existsSync(".venv/bin/python") ? ".venv/bin/python" : "python3";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -15,7 +17,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `env ATLASDOCS_ENV=development SESSION_SECRET=e2e-session-secret SESSION_SECURE=false PYTHONPATH=src:. python3 -m uvicorn tests.e2e_app:app --host 127.0.0.1 --port ${PORT}`,
+    command: `env ATLASDOCS_ENV=development SESSION_SECRET=e2e-session-secret SESSION_SECURE=false PYTHONPATH=src:. ${python} -m uvicorn tests.e2e_app:app --host 127.0.0.1 --port ${PORT}`,
     url: `${BASE}/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

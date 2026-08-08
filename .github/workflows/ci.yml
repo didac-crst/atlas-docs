@@ -2,7 +2,7 @@ name: CI
 
 # HTTPS smoke tests against live Paperless/Satlas stay manual and out of CI.
 # This workflow verifies code, migrations, packaging, frontend, and (on main/tags) image publish.
-# Image publish runs only after test + frontend + e2e + container succeed; failed CI never publishes.
+# Image publish runs only after test + frontend + e2e + container + hygiene succeed; failed CI never publishes.
 
 on:
   pull_request:
@@ -18,6 +18,50 @@ permissions:
   packages: write
 
 jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Whitespace conflict markers (git diff --check)
+        run: |
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            git diff --check origin/main...HEAD
+          else
+            git diff --check
+          fi
+
+      - name: Secret and token leak scan (tracked source)
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r file; do
+            case "$file" in
+              *.png|*.jpg|*.jpeg|*.gif|*.webp|*.ico|*.pdf|*.woff|*.woff2|*.ttf) continue ;;
+              package-lock.json|frontend/package-lock.json) continue ;;
+            esac
+            if git grep -nI -E \
+              '(ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY-----)' \
+              -- "$file" >/tmp/leak-hits.txt 2>/dev/null; then
+              echo "::error file=$file::Possible secret material"
+              cat /tmp/leak-hits.txt
+              fail=1
+            fi
+            if git grep -nIi -E \
+              '(api[_-]?key|client_secret|password|private_key)\s*[:=]\s*["'"'"'][^"'"'"']{20,}["'"'"']' \
+              -- "$file" >/tmp/cred-hits.txt 2>/dev/null; then
+              if ! grep -Eiq 'test-token|test-secret|dev-only-change-me|e2e-session-secret|example\.test|YOUR_PAPERLESS|SESSION_SECRET|DATABASE_PASSWORD|change-me' /tmp/cred-hits.txt; then
+                echo "::error file=$file::Possible hardcoded credential assignment"
+                cat /tmp/cred-hits.txt
+                fail=1
+              fi
+            fi
+          done < <(git ls-files)
+          exit "$fail"
+
   test:
     runs-on: ubuntu-latest
     services:
@@ -65,7 +109,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package.json
 
-      - name: Install and test frontend
+      - name: Install, Vitest, and TypeScript/Vite build
         working-directory: frontend
         run: |
           npm install
@@ -109,16 +153,13 @@ jobs:
         run: |
           npm install
           npx playwright install chromium --with-deps
-        env:
-          # Keep @playwright/test pinned to 1.52.0 (see package.json).
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "0"
 
-      - name: Run Playwright smoke tests
+      - name: Run Playwright smoke tests (mocked Paperless)
         run: npx playwright test
 
   container:
     runs-on: ubuntu-latest
-    needs: [test, frontend]
+    needs: [test, frontend, hygiene]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -138,7 +179,7 @@ jobs:
           tags: atlasdocs:ci
 
   publish:
-    needs: [test, frontend, e2e, container]
+    needs: [test, frontend, e2e, container, hygiene]
     if: >-
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
