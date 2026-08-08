@@ -134,10 +134,12 @@ def test_reconcile_idempotent_and_reports_missing_inaccessible(
     assert 184 in body["created"] or 184 in body["already_present"]
 
     # Listed documents are trusted from the scan; a full run only GETs orphans.
+    paperless_transport.document_calls.clear()
     full = client.post("/reconcile", headers=AUTH, json={"dry_run": True})
     assert full.status_code == 200
     assert 999 in full.json()["missing_in_paperless"]
     assert 186 in full.json()["inaccessible_in_paperless"]
+    assert sorted(paperless_transport.document_calls) == [186, 999]
     assert "not deleted" in full.json()["human_summary"].lower()
 
     second = client.post("/reconcile", headers=AUTH, json={"dry_run": False})

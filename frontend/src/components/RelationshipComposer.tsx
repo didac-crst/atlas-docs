@@ -137,7 +137,7 @@ export function RelationshipComposer({
               id="concept-q"
               role="combobox"
               aria-expanded={suggestions.length > 0 && !selected}
-              aria-controls={listId}
+              aria-controls={suggestions.length > 0 && !selected ? listId : undefined}
               aria-autocomplete="list"
               aria-activedescendant={
                 suggestions.length > 0 && !selected
