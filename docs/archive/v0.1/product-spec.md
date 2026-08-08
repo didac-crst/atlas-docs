@@ -1,3 +1,7 @@
+> **Historical document.** This file is archived and does not describe current AtlasDocs behavior.
+> Read [../../architecture.md](../../architecture.md) instead.
+> Early Phase 1 product/architecture draft.
+
 # AtlasDocs - v0.1 Product Architecture and Semantic Core
 
 ## Objective

@@ -1,3 +1,7 @@
+> **Historical document.** This file is archived and does not describe current AtlasDocs behavior.
+> Read [../../roadmap.md](../../roadmap.md) instead.
+> v0.1 vertical-slice planning note.
+
 # AtlasDocs v0.1 Roadmap — Vertical Slice
 
 > Historical planning note for the v0.1 API slice. The classification workbench

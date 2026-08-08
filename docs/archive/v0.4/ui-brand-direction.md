@@ -1,9 +1,13 @@
+> **Historical document.** This file is archived and does not describe current AtlasDocs behavior.
+> Read [../../frontend.md](../../frontend.md) instead.
+> Brand tokens and product character folded into docs/frontend.md.
+
 # AtlasDocs UI Brand Direction
 
 ## Status
 
 Product visual and interaction direction for AtlasDocs. Complements
-`docs/ui-ux-design-spec.md`. Applied by the v0.4 React workbench.
+`../v0.2/ui-ux-design-spec.md`. Applied by the v0.4 React workbench.
 
 ## Product Character
 

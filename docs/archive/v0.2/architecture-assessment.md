@@ -1,3 +1,7 @@
+> **Historical document.** This file is archived and does not describe current AtlasDocs behavior.
+> Read [../../architecture.md](../../architecture.md) instead.
+> Pre-entity-core gap analysis that informed v0.3.
+
 # AtlasDocs Architecture Assessment (post-v0.2)
 
 ## Status

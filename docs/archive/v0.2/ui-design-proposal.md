@@ -1,3 +1,7 @@
+> **Historical document.** This file is archived and does not describe current AtlasDocs behavior.
+> Read [../../frontend.md](../../frontend.md) instead.
+> Jinja workbench proposal superseded by the React SPA.
+
 # AtlasDocs v0.2 UI Design Proposal
 
 ## Product intent
