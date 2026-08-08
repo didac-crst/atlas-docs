@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 
 def log(msg: str) -> None:
@@ -17,7 +17,11 @@ def log(msg: str) -> None:
 
 
 def parse_xmp_datetime(raw: str) -> datetime | None:
-    """Parse XMP / PDF date strings into aware UTC datetimes."""
+    """Parse XMP / PDF date strings into aware datetimes.
+
+    Keep the metadata offset so `.date()` is the calendar day in that offset,
+    not a UTC-shifted day (e.g. 2025-05-31T00:30:00+01:00 must stay 2025-05-31).
+    """
     if not raw:
         return None
     text = str(raw).strip()
@@ -54,12 +58,10 @@ def parse_xmp_datetime(raw: str) -> datetime | None:
         # +01'00' / -05'00' → +0100
         tz_norm = tz.replace("'", "").replace(":", "")
         try:
-            dt = datetime.strptime(base + tz_norm, "%Y%m%d%H%M%S%z")
-            return dt.astimezone(timezone.utc)
+            return datetime.strptime(base + tz_norm, "%Y%m%d%H%M%S%z")
         except ValueError:
             try:
-                dt = datetime.strptime(base[:14] + tz_norm, "%Y%m%d%H%M%S%z")
-                return dt.astimezone(timezone.utc)
+                return datetime.strptime(base[:14] + tz_norm, "%Y%m%d%H%M%S%z")
             except ValueError:
                 return dt.replace(tzinfo=timezone.utc)
 
@@ -71,7 +73,7 @@ def parse_xmp_datetime(raw: str) -> datetime | None:
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+    return dt
 
 
 def read_pdf_create_date(path: str) -> date | None:
@@ -79,9 +81,9 @@ def read_pdf_create_date(path: str) -> date | None:
 
     with pikepdf.open(path) as pdf:
         meta = pdf.open_metadata()
+        # Never use ModifyDate as created — edits would rewrite provenance.
         candidates = [
             meta.get("xmp:CreateDate"),
-            meta.get("xmp:ModifyDate"),
         ]
         if pdf.docinfo is not None:
             candidates.append(pdf.docinfo.get("/CreationDate"))

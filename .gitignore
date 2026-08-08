@@ -16,3 +16,4 @@ paperless-ngx/consume/
 paperless-ngx/export/
 paperless-ngx/media/
 paperless-ngx/data/
+__pycache__/

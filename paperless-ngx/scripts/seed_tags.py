@@ -131,10 +131,10 @@ def seed_django(rows: list[dict], *, dry_run: bool) -> int:
                 tag.is_inbox_tag = row["is_inbox_tag"]
                 dirty = True
             current_parent = tag.get_parent()
-            desired_parent_id = parent.pk if parent is not None else None
-            current_parent_id = current_parent.pk if current_parent else None
-            if desired_parent_id != current_parent_id:
-                log(f"UPDATE parent {name}: {current_parent_id} -> {desired_parent_id}")
+            # Compare by path/name so --dry-run works when parents are placeholders.
+            current_parent_path = current_parent.name if current_parent else None
+            if parent_path != current_parent_path:
+                log(f"UPDATE parent {name}: {current_parent_path} -> {parent_path}")
                 dirty = True
                 if not dry_run:
                     tag.set_parent(parent)
@@ -145,7 +145,8 @@ def seed_django(rows: list[dict], *, dry_run: bool) -> int:
             else:
                 unchanged += 1
 
-        by_path[row["path"]] = existing.get(name) if not dry_run else object()
+        # Prefer real Tag objects; only use a placeholder for planned creates.
+        by_path[row["path"]] = existing.get(name) or (object() if dry_run else None)
 
     log(
         f"done created={created} updated={updated} unchanged={unchanged} dry_run={dry_run}"

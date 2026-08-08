@@ -2,15 +2,15 @@
 
 ## Recommended placement
 
-Use `/srv/satellite/apps/atlas-docs` as the planning root. When implementation starts, keep deployable components separate:
+Use `/srv/satellite/apps/atlas-docs` as the pilot checkout root. Current Paperless
+Compose lives at `/srv/satellite/apps/atlas-docs/paperless-ngx`. Standalone deploy
+roots remain a future decision (see `docs/paperless-pilot.md`):
 
 ```text
 /srv/satellite/apps/paperless-ngx
 /srv/satellite/apps/document-migrator
 /srv/satellite/apps/document-semantic
 ```
-
-The current scaffold is documentation only. Do not create a Compose stack until the storage and backup decisions are approved.
 
 ## Reuse
 

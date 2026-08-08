@@ -22,7 +22,7 @@ Compose and runbook live under `paperless-ngx/`.
 
 ## Open decisions
 
-- Public hostname for Cloudflare Tunnel
+- Cloudflare Tunnel for planned hostname `paperless-ngx.didac-crst.com` (LAN-only until validated)
 - Image digests after pilot acceptance
 - Whether this stack later moves to `/srv/satellite/apps/paperless-ngx` as its own deploy root
 - Bitwarden manifest entry for `paperless-ngx.secret.env` (render from Secure Note)

@@ -81,16 +81,21 @@ Host: satellite-postgres-timescale:5432 (docker network satellite-databases)
 ## LAN / public access
 
 ```text
-LAN:    http://10.10.0.12:3040
-Public: https://paperless-ngx.didac-crst.com
+LAN (active):     http://10.10.0.12:3040
+Public (pending): https://paperless-ngx.didac-crst.com
 ```
 
-Cloudflare Tunnel origin: `http://10.10.0.12:3040`.
+Cloudflare Tunnel is not configured yet. Planned origin once approved:
+`http://10.10.0.12:3040`. Until then, use LAN only.
 
 ## Start
 
 ```sh
 cd /srv/satellite/apps/atlas-docs/paperless-ngx
+# Preflight: external Postgres network must already exist.
+docker network inspect satellite-databases >/dev/null
+docker inspect satellite-postgres-timescale \
+  --format '{{json .NetworkSettings.Networks}}' | grep -q '"satellite-databases"'
 docker compose pull
 docker compose up -d
 docker compose logs -f webserver
@@ -104,3 +109,7 @@ docker compose logs -f webserver
 - [ ] Confirm DB objects in database `paperless`
 - [ ] Restart containers; data persists
 - [ ] Consume path is not the legacy archive
+- [ ] Run tag seeding with `--dry-run`, then apply; verify `workflow/inbox`
+- [ ] Verify XMP/CreateDate enrichment on a known PDF
+- [ ] Force token/API/source failure; verify consumption still completes
+- [ ] Verify LAN port `3040`, external network membership, NAS mounts, and no secrets in git
