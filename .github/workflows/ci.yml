@@ -1,20 +1,39 @@
 name: CI
 
 # HTTPS smoke tests against live Paperless/Satlas stay manual and out of CI.
-# This workflow verifies code and packaging only (no Postgres/Paperless/secrets).
+# This workflow verifies code, migrations, packaging, and (on main/tags) image publish.
+# Image publish runs only after test + container succeed; failed CI never publishes.
 
 on:
   pull_request:
   push:
     branches:
       - main
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: atlasdocs
+          POSTGRES_PASSWORD: atlasdocs
+          POSTGRES_DB: atlasdocs_migration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U atlasdocs -d atlasdocs_migration"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,7 +47,9 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev]"
 
-      - name: Run tests
+      - name: Run tests including PostgreSQL migrations
+        env:
+          ATLASDOCS_TEST_DATABASE_URL: postgresql+psycopg://atlasdocs:atlasdocs@localhost:5432/atlasdocs_migration
         run: pytest
 
   container:
@@ -50,3 +71,44 @@ jobs:
           push: false
           load: true
           tags: atlasdocs:ci
+
+  publish:
+    needs: [test, container]
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/atlasdocs
+          tags: |
+            type=sha,prefix=,format=short
+            type=sha,prefix=sha-,format=long
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -11,6 +12,8 @@ revision: str = "0002_v03_entity_external_reference"
 down_revision: Union[str, None] = "0001_v01_semantic_core"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
+_BACKFILL_BATCH_SIZE = 1000
 
 
 def _fk_name(bind, table: str, column: str, fallback: str) -> str:
@@ -23,11 +26,89 @@ def _fk_name(bind, table: str, column: str, fallback: str) -> str:
     return fallback
 
 
+def _widen_alembic_version(bind) -> None:
+    """Revision ids exceed Alembic's default VARCHAR(32) version_num column."""
+    inspector = sa.inspect(bind)
+    if "alembic_version" not in inspector.get_table_names():
+        return
+
+    dialect = bind.dialect.name
+    if dialect == "postgresql":
+        op.execute(
+            sa.text(
+                "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"
+            )
+        )
+        return
+
+    if dialect == "sqlite":
+        # SQLite does not enforce VARCHAR length; skip widening safely.
+        return
+
+    # Other dialects: best-effort batch alter when supported.
+    with op.batch_alter_table("alembic_version") as batch:
+        batch.alter_column(
+            "version_num",
+            existing_type=sa.String(length=32),
+            type_=sa.String(length=64),
+            existing_nullable=False,
+        )
+
+
+def _backfill_external_references(bind) -> None:
+    """Copy document_references into external_references on PostgreSQL and SQLite."""
+    dialect = bind.dialect.name
+    if dialect == "postgresql":
+        # Set-based insert avoids psycopg server-side cursor + executemany issues.
+        op.execute(
+            sa.text(
+                """
+                INSERT INTO external_references (id, entity_id, system, external_id, created_at)
+                SELECT gen_random_uuid(), entity_id, 'paperless',
+                       paperless_document_id::text, created_at
+                FROM document_references
+                """
+            )
+        )
+        return
+
+    # Portable path (SQLite and others): Python UUIDs in bounded batches.
+    result = bind.execute(
+        sa.text(
+            "SELECT entity_id, paperless_document_id, created_at FROM document_references"
+        )
+    )
+    insert_stmt = sa.text(
+        """
+        INSERT INTO external_references (id, entity_id, system, external_id, created_at)
+        VALUES (:id, :entity_id, 'paperless', :external_id, :created_at)
+        """
+    )
+    while True:
+        batch = result.fetchmany(_BACKFILL_BATCH_SIZE)
+        if not batch:
+            break
+        bind.execute(
+            insert_stmt,
+            [
+                {
+                    "id": str(uuid.uuid4()),
+                    "entity_id": str(entity_id),
+                    "external_id": str(paperless_document_id),
+                    "created_at": created_at,
+                }
+                for entity_id, paperless_document_id, created_at in batch
+            ],
+        )
+
+
+def _count(bind, sql: str) -> int:
+    return int(bind.execute(sa.text(sql)).scalar_one())
+
+
 def upgrade() -> None:
     bind = op.get_bind()
-
-    # Revision ids exceed Alembic's default VARCHAR(32) version_num column.
-    op.execute(sa.text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"))
+    _widen_alembic_version(bind)
 
     op.add_column("entities", sa.Column("entity_type", sa.String(length=64), nullable=True))
     op.execute(
@@ -72,17 +153,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("entity_id"),
         sa.UniqueConstraint("system", "external_id", name="uq_external_reference_system_id"),
     )
-
-    # Set-based backfill avoids psycopg server-side cursor + executemany.
-    op.execute(
-        sa.text(
-            """
-            INSERT INTO external_references (id, entity_id, system, external_id, created_at)
-            SELECT gen_random_uuid(), entity_id, 'paperless', paperless_document_id::text, created_at
-            FROM document_references
-            """
-        )
-    )
+    _backfill_external_references(bind)
 
     op.add_column(
         "relationship_types",
@@ -144,7 +215,46 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Reverse v0.3 only when every row can round-trip without semantic data loss.
+
+    Production rollback must restore a pre-upgrade database dump. This downgrade
+    refuses to delete companion edges, non-concept targets, or non-Paperless
+    external references.
+    """
     bind = op.get_bind()
+
+    non_concept_targets = _count(
+        bind,
+        """
+        SELECT COUNT(*) FROM relationships
+        WHERE target_entity_id NOT IN (SELECT id FROM concepts)
+        """,
+    )
+    concept_sourced = _count(
+        bind,
+        """
+        SELECT COUNT(*) FROM relationships
+        WHERE source_entity_id IN (
+            SELECT id FROM entities WHERE entity_type = 'concept'
+        )
+        """,
+    )
+    non_paperless_refs = _count(
+        bind,
+        """
+        SELECT COUNT(*) FROM external_references
+        WHERE system != 'paperless'
+        """,
+    )
+    if non_concept_targets or concept_sourced or non_paperless_refs:
+        raise RuntimeError(
+            "Refusing to downgrade 0002_v03_entity_external_reference: the database "
+            "contains v0.3 semantic data that cannot round-trip to v0.1 without loss "
+            f"(non_concept_targets={non_concept_targets}, "
+            f"concept_sourced_edges={concept_sourced}, "
+            f"non_paperless_refs={non_paperless_refs}). "
+            "Restore from a pre-upgrade database dump instead of running alembic downgrade."
+        )
 
     op.create_table(
         "document_references",
@@ -166,7 +276,7 @@ def downgrade() -> None:
             """
         )
     ).fetchall()
-    for ref_id, entity_id, external_id, created_at in refs:
+    if refs:
         bind.execute(
             sa.text(
                 """
@@ -174,35 +284,18 @@ def downgrade() -> None:
                 VALUES (:id, :entity_id, :paperless_document_id, :created_at)
                 """
             ),
-            {
-                "id": str(ref_id),
-                "entity_id": str(entity_id),
-                "paperless_document_id": int(external_id),
-                "created_at": created_at,
-            },
+            [
+                {
+                    "id": str(ref_id),
+                    "entity_id": str(entity_id),
+                    "paperless_document_id": int(external_id),
+                    "created_at": created_at,
+                }
+                for ref_id, entity_id, external_id, created_at in refs
+            ],
         )
 
     op.add_column("relationships", sa.Column("target_concept_id", sa.Uuid(), nullable=True))
-    # v0.1 only allowed concept targets and document sources. Drop edges that
-    # cannot round-trip before restoring those foreign keys.
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM relationships
-            WHERE target_entity_id NOT IN (SELECT id FROM concepts)
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM relationships
-            WHERE source_entity_id IN (
-                SELECT id FROM entities WHERE entity_type = 'concept'
-            )
-            """
-        )
-    )
     op.execute(sa.text("UPDATE relationships SET target_concept_id = target_entity_id"))
     op.execute(
         sa.text(

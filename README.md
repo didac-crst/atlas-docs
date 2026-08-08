@@ -56,6 +56,7 @@ curl 'http://localhost:8080/documents?unclassified=true&page=1&page_size=25' \
 - `config/seed/` — version-controlled ontology seed data
 - `alembic/` — reproducible PostgreSQL migrations
 - `docs/` — product architecture and roadmap
+- `.github/workflows/ci.yml` — tests (including Postgres migration), container build, and gated GHCR publish
 - `migration/`, `semantic/` — reserved future boundaries
 
 ## Configuration
