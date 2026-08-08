@@ -1,12 +1,15 @@
-import { FormEvent, useEffect, useId, useState } from "react";
+import { FormEvent, useEffect, useId, useMemo, useState } from "react";
 import { Waypoints } from "lucide-react";
 import {
   addRelationship,
-  searchConcepts,
-  type Concept,
+  relationshipTypesForTarget,
+  searchEntities,
   type DocumentDetail,
+  type EntitySearchHit,
   type RelationshipType,
 } from "../api/client";
+
+type TargetKind = "concept" | "document";
 
 type Props = {
   documentId: number;
@@ -24,79 +27,88 @@ export function RelationshipComposer({
   onError,
 }: Props) {
   const listId = useId();
-  const [relationship, setRelationship] = useState(types[0]?.code || "");
+  const [targetKind, setTargetKind] = useState<TargetKind>("concept");
+  const filteredTypes = useMemo(
+    () => relationshipTypesForTarget(types, targetKind),
+    [types, targetKind],
+  );
+  const [relationship, setRelationship] = useState(filteredTypes[0]?.code || "");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Concept | null>(null);
-  const [paperlessTarget, setPaperlessTarget] = useState("");
-  const [suggestions, setSuggestions] = useState<Concept[]>([]);
+  const [selected, setSelected] = useState<EntitySearchHit | null>(null);
+  const [suggestions, setSuggestions] = useState<EntitySearchHit[]>([]);
+  const [searchState, setSearchState] = useState<"idle" | "loading" | "error" | "ready">("idle");
   const [highlight, setHighlight] = useState(0);
   const [busy, setBusy] = useState(false);
 
-  const selectedType = types.find((item) => item.code === relationship) || types[0];
-  const documentTargetCodes = new Set([
-    "derived-from",
-    "has-derivative",
-    "replies-to",
-    "answered-by",
-  ]);
-  const documentMode = Boolean(selectedType && documentTargetCodes.has(selectedType.code));
-  const conceptMode = !documentMode;
+  const selectedType = filteredTypes.find((item) => item.code === relationship) || filteredTypes[0];
 
   useEffect(() => {
-    if (!types.length) return;
-    if (!types.some((item) => item.code === relationship)) {
-      setRelationship(types[0].code);
+    if (!filteredTypes.length) {
+      setRelationship("");
+      return;
     }
-  }, [types, relationship]);
+    if (!filteredTypes.some((item) => item.code === relationship)) {
+      setRelationship(filteredTypes[0].code);
+    }
+  }, [filteredTypes, relationship]);
 
   useEffect(() => {
-    if (!conceptMode) {
+    if (selected) {
       setSuggestions([]);
+      setSearchState("idle");
       return;
     }
     let cancelled = false;
+    setSearchState("loading");
     const handle = window.setTimeout(async () => {
       try {
-        const results = await searchConcepts(query, selectedType?.target_ontology);
+        const results = await searchEntities(query, {
+          entity_type: targetKind,
+          ontology: targetKind === "concept" ? selectedType?.target_ontology : null,
+        });
         if (!cancelled) {
           setSuggestions(results);
           setHighlight(0);
+          setSearchState("ready");
         }
       } catch {
-        if (!cancelled) setSuggestions([]);
+        if (!cancelled) {
+          setSuggestions([]);
+          setSearchState("error");
+        }
       }
     }, 150);
     return () => {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [query, conceptMode, selectedType?.target_ontology]);
+  }, [query, selected, targetKind, selectedType?.target_ontology]);
+
+  function resetTarget() {
+    setSelected(null);
+    setQuery("");
+    setSuggestions([]);
+    setSearchState("idle");
+  }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!relationship) {
+      onError("Choose a relationship type");
+      return;
+    }
+    if (!selected) {
+      onError("Select a target entity from the suggestions");
+      return;
+    }
     setBusy(true);
     try {
-      let body: {
-        relationship: string;
-        target?: string;
-        target_paperless_id?: number;
-      };
-      if (conceptMode) {
-        if (!selected) {
-          throw new Error("Select a concept from the suggestions");
-        }
-        body = { relationship, target: selected.code };
-      } else {
-        const id = Number(paperlessTarget);
-        if (!Number.isInteger(id) || id < 1) {
-          throw new Error("Enter a Paperless document id");
-        }
-        body = { relationship, target_paperless_id: id };
-      }
-      const document = await addRelationship(documentId, body, csrfToken);
-      setQuery("");
-      setSelected(null);
-      setPaperlessTarget("");
+      const document = await addRelationship(
+        documentId,
+        { relationship, target_entity_id: selected.id },
+        csrfToken,
+      );
+      resetTarget();
       await onSaved(document);
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to save relationship");
@@ -105,109 +117,155 @@ export function RelationshipComposer({
     }
   }
 
+  const showList = !selected && searchState === "ready" && suggestions.length > 0;
+  const showEmpty =
+    !selected && searchState === "ready" && suggestions.length === 0 && query.trim().length > 0;
+
   return (
-    <form className="composer" onSubmit={onSubmit} aria-labelledby="composer-title">
+    <form
+      id="relationship-composer"
+      className="composer composer-stacked"
+      onSubmit={onSubmit}
+      aria-labelledby="composer-title"
+    >
       <h2 id="composer-title">
-        <Waypoints size={18} aria-hidden /> Assign relationship
+        <Waypoints size={18} aria-hidden /> Add relationship
       </h2>
-      <div className="composer-actions">
-        <div className="field">
-          <label htmlFor="rel-type">Relationship type</label>
-          <select
-            id="rel-type"
-            value={relationship}
-            onChange={(event) => {
-              setRelationship(event.target.value);
-              setSelected(null);
-              setQuery("");
-            }}
-          >
-            {types.map((item) => (
+
+      <div className="field">
+        <label htmlFor="rel-target-kind">Target entity type</label>
+        <select
+          id="rel-target-kind"
+          value={targetKind}
+          onChange={(event) => {
+            setTargetKind(event.target.value as TargetKind);
+            resetTarget();
+          }}
+        >
+          <option value="concept">Concept</option>
+          <option value="document">Document</option>
+        </select>
+      </div>
+
+      <div className="field">
+        <label htmlFor="rel-type">Relationship type</label>
+        <select
+          id="rel-type"
+          value={relationship}
+          disabled={!filteredTypes.length}
+          onChange={(event) => {
+            setRelationship(event.target.value);
+            resetTarget();
+          }}
+        >
+          {filteredTypes.length === 0 ? (
+            <option value="">No types for this target</option>
+          ) : (
+            filteredTypes.map((item) => (
               <option key={item.code} value={item.code}>
                 {item.name} ({item.code})
               </option>
-            ))}
-          </select>
-        </div>
-
-        {conceptMode ? (
-          <div className="field">
-            <label htmlFor="concept-q">Concept</label>
-            <input
-              id="concept-q"
-              role="combobox"
-              aria-expanded={suggestions.length > 0 && !selected}
-              aria-controls={suggestions.length > 0 && !selected ? listId : undefined}
-              aria-autocomplete="list"
-              aria-activedescendant={
-                suggestions.length > 0 && !selected
-                  ? `${listId}-option-${highlight}`
-                  : undefined
-              }
-              value={selected ? selected.name : query}
-              onChange={(event) => {
-                setSelected(null);
-                setQuery(event.target.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setHighlight((value) => Math.min(value + 1, Math.max(suggestions.length - 1, 0)));
-                } else if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setHighlight((value) => Math.max(value - 1, 0));
-                } else if (event.key === "Enter" && !selected && suggestions[highlight]) {
-                  event.preventDefault();
-                  setSelected(suggestions[highlight]);
-                  setQuery(suggestions[highlight].name);
-                }
-              }}
-              placeholder="Type to search concepts"
-            />
-            {suggestions.length > 0 && !selected ? (
-              <ul className="suggestions" id={listId} role="listbox">
-                {suggestions.map((item, index) => (
-                  <li
-                    key={item.code}
-                    id={`${listId}-option-${index}`}
-                    role="option"
-                    aria-selected={index === highlight}
-                  >
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      onClick={() => {
-                        setSelected(item);
-                        setQuery(item.name);
-                      }}
-                    >
-                      {item.name} <span className="muted">({item.code})</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : (
-          <div className="field">
-            <label htmlFor="paperless-target">Target Paperless id</label>
-            <input
-              id="paperless-target"
-              inputMode="numeric"
-              value={paperlessTarget}
-              onChange={(event) => setPaperlessTarget(event.target.value)}
-              placeholder="e.g. 185"
-            />
-          </div>
-        )}
-
-        <button className="btn btn-primary" type="submit" disabled={busy || !types.length}>
-          {busy ? "Saving…" : "Save"}
-        </button>
+            ))
+          )}
+        </select>
       </div>
-      {!documentMode ? null : (
-        <p className="muted">Document-to-document edges use a Paperless id as the target.</p>
-      )}
+
+      <div className="field">
+        <label htmlFor="entity-q">Target</label>
+        <input
+          id="entity-q"
+          role="combobox"
+          aria-expanded={showList}
+          aria-controls={showList ? listId : undefined}
+          aria-autocomplete="list"
+          aria-activedescendant={
+            showList ? `${listId}-option-${highlight}` : undefined
+          }
+          value={selected ? selected.label : query}
+          onChange={(event) => {
+            setSelected(null);
+            setQuery(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (!showList) return;
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setHighlight((value) => Math.min(value + 1, Math.max(suggestions.length - 1, 0)));
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setHighlight((value) => Math.max(value - 1, 0));
+            } else if (event.key === "Enter" && suggestions[highlight]) {
+              event.preventDefault();
+              setSelected(suggestions[highlight]);
+              setQuery(suggestions[highlight].label);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              resetTarget();
+            }
+          }}
+          placeholder="Search AtlasDocs…"
+          disabled={!relationship}
+        />
+        {searchState === "loading" && !selected ? (
+          <p className="field-status muted" role="status">
+            Searching…
+          </p>
+        ) : null}
+        {searchState === "error" && !selected ? (
+          <p className="field-status field-status-error" role="alert">
+            Could not search entities. Try again.
+          </p>
+        ) : null}
+        {showEmpty ? (
+          <p className="field-status muted" role="status">
+            No matching entities.
+          </p>
+        ) : null}
+        {showList ? (
+          <ul className="suggestions" id={listId} role="listbox">
+            {suggestions.map((item, index) => (
+              <li
+                key={item.id}
+                id={`${listId}-option-${index}`}
+                role="option"
+                aria-selected={index === highlight}
+              >
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onMouseEnter={() => setHighlight(index)}
+                  onClick={() => {
+                    setSelected(item);
+                    setQuery(item.label);
+                  }}
+                >
+                  {item.label}
+                  {item.subtitle ? <span className="muted"> · {item.subtitle}</span> : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
+      {selected ? (
+        <div className="composer-confirm" aria-live="polite">
+          <p>
+            <strong>{selectedType?.name || relationship}</strong>
+            {" → "}
+            <strong>{selected.label}</strong>
+            {selected.subtitle ? <span className="muted"> · {selected.subtitle}</span> : null}
+          </p>
+        </div>
+      ) : null}
+
+      <button
+        className="btn btn-primary"
+        type="submit"
+        disabled={busy || !types.length || !relationship || !selected}
+      >
+        {busy ? "Saving…" : "Save"}
+      </button>
     </form>
   );
 }

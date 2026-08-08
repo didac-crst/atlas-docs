@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-test("password login, home, ingest, classify bulk without leaking secrets", async ({ page }) => {
+test("password login, home, ingest, classify without leaking secrets", async ({ page }) => {
   const password = "correct-horse";
   const username = "ada";
 
@@ -17,7 +17,7 @@ test("password login, home, ingest, classify bulk without leaking secrets", asyn
   await expect(page.getByRole("heading", { name: /^AtlasDocs$/i })).toBeVisible({
     timeout: 15000,
   });
-  await expect(page.getByText(/Choose a task/i)).toBeVisible();
+  await expect(page.getByText(/Work areas|Needs classification/i).first()).toBeVisible();
   await expect(page.getByText(password)).toHaveCount(0);
   await expect(page.getByText(/e2e-exchanged-token/i)).toHaveCount(0);
 

@@ -7,6 +7,7 @@ import {
   fetchRelationshipTypes,
   getSession,
   type ClassificationFilter,
+  type CompletenessFilter,
   type DocumentDetail,
   type DocumentSort,
   type QueuePage,
@@ -28,8 +29,18 @@ function parseClassification(value: string | null): ClassificationFilter {
   return "unclassified";
 }
 
+function parseCompleteness(value: string | null): CompletenessFilter {
+  if (value === "empty" || value === "partial" || value === "complete" || value === "any") {
+    return value;
+  }
+  return "any";
+}
+
 function parseSort(value: string | null): DocumentSort {
-  return value === "title" ? "title" : "created";
+  if (value === "title" || value === "correspondent" || value === "added" || value === "created") {
+    return value;
+  }
+  return "created";
 }
 
 function parseOrder(value: string | null): SortOrder {
@@ -49,6 +60,12 @@ export function WorkbenchPage({ session, onSession }: Props) {
       classification: parseClassification(searchParams.get("classification")),
       sort: parseSort(searchParams.get("sort")),
       order: parseOrder(searchParams.get("order")),
+      created_gte: searchParams.get("created_gte") || "",
+      created_lte: searchParams.get("created_lte") || "",
+      correspondent: searchParams.get("correspondent") || "",
+      document_type: searchParams.get("document_type") || "",
+      tag: searchParams.get("tag") || "",
+      completeness: parseCompleteness(searchParams.get("completeness")),
     }),
     [searchParams],
   );
@@ -73,6 +90,12 @@ export function WorkbenchPage({ session, onSession }: Props) {
       classification: overrides.classification ?? filters.classification,
       sort: overrides.sort ?? filters.sort,
       order: overrides.order ?? filters.order,
+      created_gte: overrides.created_gte ?? filters.created_gte,
+      created_lte: overrides.created_lte ?? filters.created_lte,
+      correspondent: overrides.correspondent ?? filters.correspondent,
+      document_type: overrides.document_type ?? filters.document_type,
+      tag: overrides.tag ?? filters.tag,
+      completeness: overrides.completeness ?? filters.completeness,
     };
   }
 
@@ -86,6 +109,12 @@ export function WorkbenchPage({ session, onSession }: Props) {
     }
     if (next.sort !== "created") params.set("sort", next.sort);
     if (next.order !== "desc") params.set("order", next.order);
+    if (next.created_gte.trim()) params.set("created_gte", next.created_gte.trim());
+    if (next.created_lte.trim()) params.set("created_lte", next.created_lte.trim());
+    if (next.correspondent.trim()) params.set("correspondent", next.correspondent.trim());
+    if (next.document_type.trim()) params.set("document_type", next.document_type.trim());
+    if (next.tag.trim()) params.set("tag", next.tag.trim());
+    if (next.completeness !== "any") params.set("completeness", next.completeness);
     const query = params.toString();
     return query ? `?${query}` : "";
   }
@@ -139,7 +168,21 @@ export function WorkbenchPage({ session, onSession }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [page, selectedId, filters.q, filters.classification, filters.sort, filters.order, navigate]);
+  }, [
+    page,
+    selectedId,
+    filters.q,
+    filters.classification,
+    filters.sort,
+    filters.order,
+    filters.created_gte,
+    filters.created_lte,
+    filters.correspondent,
+    filters.document_type,
+    filters.tag,
+    filters.completeness,
+    navigate,
+  ]);
 
   const panelTitle =
     filters.classification === "classified"
@@ -197,6 +240,11 @@ export function WorkbenchPage({ session, onSession }: Props) {
             <SemanticDocumentDetail
               document={document}
               csrfToken={session.csrf_token}
+              onAddRelationship={() => {
+                window.document
+                  .getElementById("relationship-composer")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
               onRemoved={async (nextDoc, message) => {
                 setDocument(nextDoc);
                 setNotice(message);
@@ -224,7 +272,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
           <>
             <h1 id="detail-title">Select a document</h1>
             <p className="empty">
-              Choose a Paperless document from the queue to assign typed relationships.
+              Choose a document from the queue to assign typed relationships.
             </p>
           </>
         )}

@@ -29,6 +29,11 @@ from atlasdocs.api.schemas import (
     ConceptResponse,
     CreateRelationshipRequest,
     DocumentResponse,
+    EntitySearchHitResponse,
+    HomeSummaryResponse,
+    CountStatResponse,
+    RecentDocumentResponse,
+    RecentKnowledgeResponse,
     IngestionJobResponse,
     IngestionJobsResponse,
     ReconcileRequest,
@@ -49,6 +54,7 @@ from atlasdocs.services.documents import (
     UpstreamError,
     ValidationError,
 )
+from atlasdocs.services.home import HomeService
 from atlasdocs.services.ingest import DuplicateIngestError, IngestionService
 from atlasdocs.services.login_rate_limit import login_rate_limiter
 from atlasdocs.services.paperless import PaperlessAuthError, PaperlessClient, PaperlessError
@@ -108,6 +114,13 @@ def get_ui_ingest_service(
     paperless: PaperlessClient = Depends(get_paperless_client),
 ) -> IngestionService:
     return IngestionService(session, paperless)
+
+
+def get_ui_home_service(
+    session: Session = Depends(get_db),
+    paperless: PaperlessClient = Depends(get_paperless_client),
+) -> HomeService:
+    return HomeService(session, paperless)
 
 
 def _validate_csrf(session_csrf: str, csrf_token: str | None) -> bool:
@@ -317,6 +330,84 @@ def disconnect(
     )
 
 
+@api_router.get("/home", response_model=HomeSummaryResponse)
+def get_home_summary(
+    request: Request,
+    db: Session = Depends(get_db),
+    service: HomeService = Depends(get_ui_home_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    try:
+        summary = service.summarize(auth)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    body = HomeSummaryResponse(
+        needs_classification=CountStatResponse(
+            count=summary.needs_classification.count,
+            capped=summary.needs_classification.capped,
+        ),
+        needs_review=CountStatResponse(
+            count=summary.needs_review.count, capped=summary.needs_review.capped
+        ),
+        failed_ingestion=CountStatResponse(
+            count=summary.failed_ingestion.count, capped=summary.failed_ingestion.capped
+        ),
+        reconciliation_issues=CountStatResponse(
+            count=summary.reconciliation_issues.count,
+            capped=summary.reconciliation_issues.capped,
+        ),
+        recent_documents=[
+            RecentDocumentResponse(
+                label=item.label,
+                entity_id=item.entity_id,
+                href=item.href,
+                created_date=item.created_date,
+            )
+            for item in summary.recent_documents
+        ],
+        recent_knowledge=[
+            RecentKnowledgeResponse(
+                label=item.label,
+                relationship_type=item.relationship_type,
+                href=item.href,
+            )
+            for item in summary.recent_knowledge
+        ],
+    )
+    return _json_with_session(body, ui_session)
+
+
+@api_router.get("/entities/search", response_model=list[EntitySearchHitResponse])
+def search_entities(
+    request: Request,
+    q: str = Query(default=""),
+    entity_type: str | None = Query(default=None),
+    ontology: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    try:
+        hits = service.search_entities(
+            auth, q=q, entity_type=entity_type, ontology_code=ontology
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    payload = [
+        EntitySearchHitResponse(
+            id=item.id,
+            label=item.label,
+            entity_type=item.entity_type,
+            subtitle=item.subtitle,
+            open_url=item.open_url,
+        )
+        for item in hits
+    ]
+    response = JSONResponse(content=[item.model_dump() for item in payload])
+    set_session_cookie(response, ui_session)
+    return response
+
+
 @api_router.get("/documents", response_model=UnclassifiedPageResponse)
 def list_documents(
     request: Request,
@@ -325,6 +416,12 @@ def list_documents(
     q: str | None = Query(default=None),
     sort: str | None = Query(default=None),
     order: str = Query(default="desc"),
+    created_gte: str | None = Query(default=None),
+    created_lte: str | None = Query(default=None),
+    correspondent: str | None = Query(default=None),
+    document_type: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    completeness: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=UNCLASSIFIED_PAGE_SIZE, ge=1, le=UNCLASSIFIED_PAGE_SIZE),
     db: Session = Depends(get_db),
@@ -347,6 +444,12 @@ def list_documents(
             classification=classification,
             sort=sort,
             order=order,
+            created_gte=created_gte,
+            created_lte=created_lte,
+            correspondent=correspondent,
+            document_type=document_type,
+            tag=tag,
+            completeness=completeness,
         )
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc

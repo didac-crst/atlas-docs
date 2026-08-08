@@ -14,6 +14,12 @@ const defaultFilters = {
   classification: "unclassified" as const,
   sort: "created" as const,
   order: "desc" as const,
+  created_gte: "",
+  created_lte: "",
+  correspondent: "",
+  document_type: "",
+  tag: "",
+  completeness: "any" as const,
 };
 
 const baseProps = {
@@ -53,7 +59,7 @@ describe("DocumentQueue", () => {
     expect(screen.getByText(/^Next$/i)).toBeInTheDocument();
   });
 
-  it("renders queue items and filter controls", () => {
+  it("renders queue items and filter controls without Paperless ids as labels", () => {
     renderQueue(
       <DocumentQueue
         {...baseProps}
@@ -69,10 +75,17 @@ describe("DocumentQueue", () => {
               correspondent: "Acme Payroll",
               document_type: "Payslip",
             },
+            {
+              paperless_document_id: 185,
+              title: null,
+              created_date: null,
+              correspondent: null,
+              document_type: null,
+            },
           ],
           page: 1,
           page_size: 25,
-          paperless_count: 1,
+          paperless_count: 2,
           has_next: false,
           has_previous: false,
           next_page: null,
@@ -83,10 +96,18 @@ describe("DocumentQueue", () => {
       "aria-current",
       "true",
     );
+    expect(screen.getByRole("button", { name: /Untitled document/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Document 185/i)).toBeNull();
+    expect(screen.queryByText(/Paperless #/i)).toBeNull();
     expect(screen.getByLabelText(/^Search$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Date from$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Date to$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Correspondent$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Document type$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Tag$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^Classification$/i)).toHaveValue("unclassified");
-    expect(screen.getByLabelText(/^Sort$/i)).toHaveValue("created");
-    expect(screen.getByLabelText(/^Order$/i)).toHaveValue("desc");
+    expect(screen.getByLabelText(/^Completeness$/i)).toHaveValue("any");
+    expect(screen.getByLabelText(/^Sort$/i)).toHaveValue("newest");
   });
 
   it("notifies parent when classification filter changes", async () => {
@@ -110,5 +131,32 @@ describe("DocumentQueue", () => {
     );
     await user.selectOptions(screen.getByLabelText(/^Classification$/i), "any");
     expect(onFiltersChange).toHaveBeenCalledWith({ classification: "any", page: 1 });
+  });
+
+  it("maps sort presets to sort and order", async () => {
+    const user = userEvent.setup();
+    const onFiltersChange = vi.fn();
+    renderQueue(
+      <DocumentQueue
+        {...baseProps}
+        page={1}
+        onFiltersChange={onFiltersChange}
+        queue={{
+          items: [],
+          page: 1,
+          page_size: 25,
+          paperless_count: 0,
+          has_next: false,
+          has_previous: false,
+          next_page: null,
+        }}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText(/^Sort$/i), "correspondent");
+    expect(onFiltersChange).toHaveBeenCalledWith({
+      sort: "correspondent",
+      order: "asc",
+      page: 1,
+    });
   });
 });

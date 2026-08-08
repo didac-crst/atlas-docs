@@ -1,13 +1,15 @@
-import { FormEvent, useEffect, useId, useState } from "react";
+import { FormEvent, useEffect, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Waypoints } from "lucide-react";
 import {
   bulkAddRelationships,
-  searchConcepts,
+  relationshipTypesForTarget,
+  searchEntities,
   summarizeBulkResults,
   type ClassificationFilter,
-  type Concept,
+  type CompletenessFilter,
   type DocumentSort,
+  type EntitySearchHit,
   type QueuePage,
   type RelationshipType,
   type SortOrder,
@@ -18,6 +20,12 @@ export type QueueFilters = {
   classification: ClassificationFilter;
   sort: DocumentSort;
   order: SortOrder;
+  created_gte: string;
+  created_lte: string;
+  correspondent: string;
+  document_type: string;
+  tag: string;
+  completeness: CompletenessFilter;
 };
 
 type Props = {
@@ -34,12 +42,34 @@ type Props = {
   onError: (message: string) => void;
 };
 
-const DOCUMENT_TARGET_CODES = new Set([
-  "derived-from",
-  "has-derivative",
-  "replies-to",
-  "answered-by",
-]);
+type TargetKind = "concept" | "document";
+
+type SortPreset = "newest" | "oldest" | "title" | "correspondent";
+
+function sortPresetFromFilters(sort: DocumentSort, order: SortOrder): SortPreset {
+  if (sort === "title") return "title";
+  if (sort === "correspondent") return "correspondent";
+  if (sort === "created" && order === "asc") return "oldest";
+  return "newest";
+}
+
+function filtersFromSortPreset(preset: SortPreset): Pick<QueueFilters, "sort" | "order"> {
+  switch (preset) {
+    case "oldest":
+      return { sort: "created", order: "asc" };
+    case "title":
+      return { sort: "title", order: "asc" };
+    case "correspondent":
+      return { sort: "correspondent", order: "asc" };
+    case "newest":
+    default:
+      return { sort: "created", order: "desc" };
+  }
+}
+
+function queueItemTitle(title: string | null): string {
+  return title?.trim() || "Untitled document";
+}
 
 export function DocumentQueue({
   queue,
@@ -56,10 +86,27 @@ export function DocumentQueue({
 }: Props) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [draftQ, setDraftQ] = useState(filters.q);
+  const [draftCreatedGte, setDraftCreatedGte] = useState(filters.created_gte);
+  const [draftCreatedLte, setDraftCreatedLte] = useState(filters.created_lte);
+  const [draftCorrespondent, setDraftCorrespondent] = useState(filters.correspondent);
+  const [draftDocumentType, setDraftDocumentType] = useState(filters.document_type);
+  const [draftTag, setDraftTag] = useState(filters.tag);
 
   useEffect(() => {
     setDraftQ(filters.q);
-  }, [filters.q]);
+    setDraftCreatedGte(filters.created_gte);
+    setDraftCreatedLte(filters.created_lte);
+    setDraftCorrespondent(filters.correspondent);
+    setDraftDocumentType(filters.document_type);
+    setDraftTag(filters.tag);
+  }, [
+    filters.q,
+    filters.created_gte,
+    filters.created_lte,
+    filters.correspondent,
+    filters.document_type,
+    filters.tag,
+  ]);
 
   useEffect(() => {
     if (!queue) return;
@@ -96,13 +143,23 @@ export function DocumentQueue({
         ? "No documents in this page."
         : "No unclassified documents in this page.";
 
+  const sortPreset = sortPresetFromFilters(filters.sort, filters.order);
+
   return (
     <div>
       <form
         className="queue-filters"
         onSubmit={(event) => {
           event.preventDefault();
-          onFiltersChange({ q: draftQ, page: 1 });
+          onFiltersChange({
+            q: draftQ,
+            created_gte: draftCreatedGte,
+            created_lte: draftCreatedLte,
+            correspondent: draftCorrespondent,
+            document_type: draftDocumentType,
+            tag: draftTag,
+            page: 1,
+          });
         }}
       >
         <div className="field">
@@ -112,6 +169,51 @@ export function DocumentQueue({
             value={draftQ}
             onChange={(event) => setDraftQ(event.target.value)}
             placeholder="Title or text"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="queue-created-gte">Date from</label>
+          <input
+            id="queue-created-gte"
+            type="date"
+            value={draftCreatedGte}
+            onChange={(event) => setDraftCreatedGte(event.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="queue-created-lte">Date to</label>
+          <input
+            id="queue-created-lte"
+            type="date"
+            value={draftCreatedLte}
+            onChange={(event) => setDraftCreatedLte(event.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="queue-correspondent">Correspondent</label>
+          <input
+            id="queue-correspondent"
+            value={draftCorrespondent}
+            onChange={(event) => setDraftCorrespondent(event.target.value)}
+            placeholder="Name"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="queue-document-type">Document type</label>
+          <input
+            id="queue-document-type"
+            value={draftDocumentType}
+            onChange={(event) => setDraftDocumentType(event.target.value)}
+            placeholder="Type"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="queue-tag">Tag</label>
+          <input
+            id="queue-tag"
+            value={draftTag}
+            onChange={(event) => setDraftTag(event.target.value)}
+            placeholder="Tag"
           />
         </div>
         <div className="field">
@@ -132,33 +234,43 @@ export function DocumentQueue({
           </select>
         </div>
         <div className="field">
-          <label htmlFor="queue-sort">Sort</label>
+          <label htmlFor="queue-completeness">Completeness</label>
           <select
-            id="queue-sort"
-            value={filters.sort}
+            id="queue-completeness"
+            value={filters.completeness}
             onChange={(event) =>
-              onFiltersChange({ sort: event.target.value as DocumentSort, page: 1 })
+              onFiltersChange({
+                completeness: event.target.value as CompletenessFilter,
+                page: 1,
+              })
             }
           >
-            <option value="created">Created</option>
-            <option value="title">Title</option>
+            <option value="any">Any</option>
+            <option value="empty">Empty</option>
+            <option value="partial">Partial</option>
+            <option value="complete">Complete</option>
           </select>
         </div>
         <div className="field">
-          <label htmlFor="queue-order">Order</label>
+          <label htmlFor="queue-sort">Sort</label>
           <select
-            id="queue-order"
-            value={filters.order}
+            id="queue-sort"
+            value={sortPreset}
             onChange={(event) =>
-              onFiltersChange({ order: event.target.value as SortOrder, page: 1 })
+              onFiltersChange({
+                ...filtersFromSortPreset(event.target.value as SortPreset),
+                page: 1,
+              })
             }
           >
-            <option value="desc">Descending</option>
-            <option value="asc">Ascending</option>
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="title">Title</option>
+            <option value="correspondent">Correspondent</option>
           </select>
         </div>
         <button className="btn btn-secondary" type="submit">
-          Apply search
+          Apply filters
         </button>
       </form>
 
@@ -167,7 +279,7 @@ export function DocumentQueue({
       ) : (
         <>
           <p className="muted" style={{ fontVariantNumeric: "tabular-nums" }}>
-            Page {queue.page} · {queue.items.length} shown · Paperless {queue.paperless_count}
+            Page {queue.page} · {queue.items.length} shown · {queue.paperless_count} total
           </p>
           {queue.items.length === 0 ? (
             <p className="empty">{emptyLabel}</p>
@@ -188,35 +300,35 @@ export function DocumentQueue({
                 <span className="muted">{selected.size} selected</span>
               </div>
               <ul className="queue-list">
-                {queue.items.map((item) => (
-                  <li key={item.paperless_document_id} className="queue-row">
-                    <label className="queue-check">
-                      <span className="sr-only">
-                        Select {item.title || `Document ${item.paperless_document_id}`}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(item.paperless_document_id)}
-                        onChange={() => toggle(item.paperless_document_id)}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="queue-item"
-                      aria-current={
-                        selectedId === item.paperless_document_id ? "true" : undefined
-                      }
-                      onClick={() => onSelect(item.paperless_document_id)}
-                    >
-                      <strong>{item.title || `Document ${item.paperless_document_id}`}</strong>
-                      <span className="meta">
-                        {[item.created_date, item.correspondent, item.document_type]
-                          .filter(Boolean)
-                          .join(" · ") || `Paperless #${item.paperless_document_id}`}
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                {queue.items.map((item) => {
+                  const title = queueItemTitle(item.title);
+                  const meta = [item.created_date, item.correspondent, item.document_type]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return (
+                    <li key={item.paperless_document_id} className="queue-row">
+                      <label className="queue-check">
+                        <span className="sr-only">Select {title}</span>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(item.paperless_document_id)}
+                          onChange={() => toggle(item.paperless_document_id)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="queue-item"
+                        aria-current={
+                          selectedId === item.paperless_document_id ? "true" : undefined
+                        }
+                        onClick={() => onSelect(item.paperless_document_id)}
+                      >
+                        <strong>{title}</strong>
+                        {meta ? <span className="meta">{meta}</span> : null}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </>
           )}
@@ -261,79 +373,92 @@ type BulkProps = {
 
 function BulkAssignForm({ selectedIds, types, csrfToken, onDone, onError }: BulkProps) {
   const listId = useId();
-  const [relationship, setRelationship] = useState(types[0]?.code || "");
+  const [targetKind, setTargetKind] = useState<TargetKind>("concept");
+  const filteredTypes = useMemo(
+    () => relationshipTypesForTarget(types, targetKind),
+    [types, targetKind],
+  );
+  const [relationship, setRelationship] = useState(filteredTypes[0]?.code || "");
   const [query, setQuery] = useState("");
-  const [concept, setConcept] = useState<Concept | null>(null);
-  const [paperlessTarget, setPaperlessTarget] = useState("");
-  const [suggestions, setSuggestions] = useState<Concept[]>([]);
+  const [selectedEntity, setSelectedEntity] = useState<EntitySearchHit | null>(null);
+  const [suggestions, setSuggestions] = useState<EntitySearchHit[]>([]);
+  const [searchState, setSearchState] = useState<"idle" | "loading" | "error" | "ready">("idle");
   const [highlight, setHighlight] = useState(0);
   const [busy, setBusy] = useState(false);
 
-  const selectedType = types.find((item) => item.code === relationship) || types[0];
-  const documentMode = Boolean(selectedType && DOCUMENT_TARGET_CODES.has(selectedType.code));
-  const conceptMode = !documentMode;
+  const selectedType = filteredTypes.find((item) => item.code === relationship) || filteredTypes[0];
 
   useEffect(() => {
-    if (!types.length) return;
-    if (!types.some((item) => item.code === relationship)) {
-      setRelationship(types[0].code);
+    if (!filteredTypes.length) {
+      setRelationship("");
+      return;
     }
-  }, [types, relationship]);
+    if (!filteredTypes.some((item) => item.code === relationship)) {
+      setRelationship(filteredTypes[0].code);
+    }
+  }, [filteredTypes, relationship]);
 
   useEffect(() => {
-    if (!conceptMode) {
+    if (selectedEntity) {
       setSuggestions([]);
+      setSearchState("idle");
       return;
     }
     let cancelled = false;
+    setSearchState("loading");
     const handle = window.setTimeout(async () => {
       try {
-        const results = await searchConcepts(query, selectedType?.target_ontology);
+        const results = await searchEntities(query, {
+          entity_type: targetKind,
+          ontology: targetKind === "concept" ? selectedType?.target_ontology : null,
+        });
         if (!cancelled) {
           setSuggestions(results);
           setHighlight(0);
+          setSearchState("ready");
         }
       } catch {
-        if (!cancelled) setSuggestions([]);
+        if (!cancelled) {
+          setSuggestions([]);
+          setSearchState("error");
+        }
       }
     }, 150);
     return () => {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [query, conceptMode, selectedType?.target_ontology]);
+  }, [query, selectedEntity, targetKind, selectedType?.target_ontology]);
+
+  function resetTarget() {
+    setSelectedEntity(null);
+    setQuery("");
+    setSuggestions([]);
+    setSearchState("idle");
+  }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!relationship) {
+      onError("Choose a relationship type");
+      return;
+    }
+    if (!selectedEntity) {
+      onError("Select a target entity from the suggestions");
+      return;
+    }
     setBusy(true);
     try {
-      let body: {
-        paperless_document_ids: number[];
-        relationship: string;
-        target?: string;
-        target_paperless_id?: number;
-        csrf_token: string;
-      } = {
-        paperless_document_ids: selectedIds,
-        relationship,
-        csrf_token: csrfToken,
-      };
-      if (conceptMode) {
-        if (!concept) {
-          throw new Error("Select a concept from the suggestions");
-        }
-        body = { ...body, target: concept.code };
-      } else {
-        const id = Number(paperlessTarget);
-        if (!Number.isInteger(id) || id < 1) {
-          throw new Error("Enter a Paperless document id");
-        }
-        body = { ...body, target_paperless_id: id };
-      }
-      const response = await bulkAddRelationships(body, csrfToken);
-      setQuery("");
-      setConcept(null);
-      setPaperlessTarget("");
+      const response = await bulkAddRelationships(
+        {
+          paperless_document_ids: selectedIds,
+          relationship,
+          target_entity_id: selectedEntity.id,
+          csrf_token: csrfToken,
+        },
+        csrfToken,
+      );
+      resetTarget();
       await onDone(`Bulk assign: ${summarizeBulkResults(response.results)}`);
     } catch (err) {
       onError(err instanceof Error ? err.message : "Bulk assign failed");
@@ -342,104 +467,150 @@ function BulkAssignForm({ selectedIds, types, csrfToken, onDone, onError }: Bulk
     }
   }
 
+  const showList = !selectedEntity && searchState === "ready" && suggestions.length > 0;
+  const showEmpty =
+    !selectedEntity &&
+    searchState === "ready" &&
+    suggestions.length === 0 &&
+    query.trim().length > 0;
+
   return (
-    <form className="composer bulk-assign" onSubmit={onSubmit} aria-labelledby="bulk-title">
+    <form className="composer composer-stacked bulk-assign" onSubmit={onSubmit} aria-labelledby="bulk-title">
       <h2 id="bulk-title">
         <Waypoints size={18} aria-hidden /> Bulk assign ({selectedIds.length})
       </h2>
-      <div className="composer-actions">
-        <div className="field">
-          <label htmlFor="bulk-rel-type">Relationship type</label>
-          <select
-            id="bulk-rel-type"
-            value={relationship}
-            onChange={(event) => {
-              setRelationship(event.target.value);
-              setConcept(null);
-              setQuery("");
-            }}
-          >
-            {types.map((item) => (
+
+      <div className="field">
+        <label htmlFor="bulk-target-kind">Target entity type</label>
+        <select
+          id="bulk-target-kind"
+          value={targetKind}
+          onChange={(event) => {
+            setTargetKind(event.target.value as TargetKind);
+            resetTarget();
+          }}
+        >
+          <option value="concept">Concept</option>
+          <option value="document">Document</option>
+        </select>
+      </div>
+
+      <div className="field">
+        <label htmlFor="bulk-rel-type">Relationship type</label>
+        <select
+          id="bulk-rel-type"
+          value={relationship}
+          disabled={!filteredTypes.length}
+          onChange={(event) => {
+            setRelationship(event.target.value);
+            resetTarget();
+          }}
+        >
+          {filteredTypes.length === 0 ? (
+            <option value="">No types for this target</option>
+          ) : (
+            filteredTypes.map((item) => (
               <option key={item.code} value={item.code}>
                 {item.name} ({item.code})
               </option>
-            ))}
-          </select>
-        </div>
-
-        {conceptMode ? (
-          <div className="field">
-            <label htmlFor="bulk-concept-q">Concept</label>
-            <input
-              id="bulk-concept-q"
-              role="combobox"
-              aria-expanded={suggestions.length > 0 && !concept}
-              aria-controls={suggestions.length > 0 && !concept ? listId : undefined}
-              aria-autocomplete="list"
-              aria-activedescendant={
-                suggestions.length > 0 && !concept ? `${listId}-option-${highlight}` : undefined
-              }
-              value={concept ? concept.name : query}
-              onChange={(event) => {
-                setConcept(null);
-                setQuery(event.target.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setHighlight((value) => Math.min(value + 1, Math.max(suggestions.length - 1, 0)));
-                } else if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setHighlight((value) => Math.max(value - 1, 0));
-                } else if (event.key === "Enter" && !concept && suggestions[highlight]) {
-                  event.preventDefault();
-                  setConcept(suggestions[highlight]);
-                  setQuery(suggestions[highlight].name);
-                }
-              }}
-              placeholder="Type to search concepts"
-            />
-            {suggestions.length > 0 && !concept ? (
-              <ul className="suggestions" id={listId} role="listbox">
-                {suggestions.map((item, index) => (
-                  <li
-                    key={item.code}
-                    id={`${listId}-option-${index}`}
-                    role="option"
-                    aria-selected={index === highlight}
-                  >
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      onClick={() => {
-                        setConcept(item);
-                        setQuery(item.name);
-                      }}
-                    >
-                      {item.name} <span className="muted">({item.code})</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : (
-          <div className="field">
-            <label htmlFor="bulk-paperless-target">Target Paperless id</label>
-            <input
-              id="bulk-paperless-target"
-              inputMode="numeric"
-              value={paperlessTarget}
-              onChange={(event) => setPaperlessTarget(event.target.value)}
-              placeholder="e.g. 185"
-            />
-          </div>
-        )}
-
-        <button className="btn btn-primary" type="submit" disabled={busy || !types.length}>
-          {busy ? "Assigning…" : "Assign to selected"}
-        </button>
+            ))
+          )}
+        </select>
       </div>
+
+      <div className="field">
+        <label htmlFor="bulk-entity-q">Target</label>
+        <input
+          id="bulk-entity-q"
+          role="combobox"
+          aria-expanded={showList}
+          aria-controls={showList ? listId : undefined}
+          aria-autocomplete="list"
+          aria-activedescendant={showList ? `${listId}-option-${highlight}` : undefined}
+          value={selectedEntity ? selectedEntity.label : query}
+          onChange={(event) => {
+            setSelectedEntity(null);
+            setQuery(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (!showList) return;
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setHighlight((value) => Math.min(value + 1, Math.max(suggestions.length - 1, 0)));
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setHighlight((value) => Math.max(value - 1, 0));
+            } else if (event.key === "Enter" && suggestions[highlight]) {
+              event.preventDefault();
+              setSelectedEntity(suggestions[highlight]);
+              setQuery(suggestions[highlight].label);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              resetTarget();
+            }
+          }}
+          placeholder="Search AtlasDocs…"
+          disabled={!relationship}
+        />
+        {searchState === "loading" && !selectedEntity ? (
+          <p className="field-status muted" role="status">
+            Searching…
+          </p>
+        ) : null}
+        {searchState === "error" && !selectedEntity ? (
+          <p className="field-status field-status-error" role="alert">
+            Could not search entities. Try again.
+          </p>
+        ) : null}
+        {showEmpty ? (
+          <p className="field-status muted" role="status">
+            No matching entities.
+          </p>
+        ) : null}
+        {showList ? (
+          <ul className="suggestions" id={listId} role="listbox">
+            {suggestions.map((item, index) => (
+              <li
+                key={item.id}
+                id={`${listId}-option-${index}`}
+                role="option"
+                aria-selected={index === highlight}
+              >
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onMouseEnter={() => setHighlight(index)}
+                  onClick={() => {
+                    setSelectedEntity(item);
+                    setQuery(item.label);
+                  }}
+                >
+                  {item.label}
+                  {item.subtitle ? <span className="muted"> · {item.subtitle}</span> : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
+      {selectedEntity ? (
+        <div className="composer-confirm" aria-live="polite">
+          <p>
+            <strong>{selectedType?.name || relationship}</strong>
+            {" → "}
+            <strong>{selectedEntity.label}</strong>
+          </p>
+        </div>
+      ) : null}
+
+      <button
+        className="btn btn-primary"
+        type="submit"
+        disabled={busy || !types.length || !relationship || !selectedEntity}
+      >
+        {busy ? "Assigning…" : "Assign to selected"}
+      </button>
     </form>
   );
 }

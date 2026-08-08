@@ -233,12 +233,27 @@ class PaperlessClient:
         page_size: int = 25,
         query: str | None = None,
         ordering: str | None = None,
+        created_gte: str | None = None,
+        created_lte: str | None = None,
+        correspondent: str | None = None,
+        document_type: str | None = None,
+        tag: str | None = None,
     ) -> PaperlessDocumentPage:
         params: dict[str, str | int] = {"page": page, "page_size": page_size}
         if query:
             params["query"] = query
         if ordering:
             params["ordering"] = ordering
+        if created_gte:
+            params["created__date__gte"] = created_gte
+        if created_lte:
+            params["created__date__lte"] = created_lte
+        if correspondent:
+            params["correspondent__name__icontains"] = correspondent
+        if document_type:
+            params["document_type__name__icontains"] = document_type
+        if tag:
+            params["tags__name__icontains"] = tag
         url = f"{self._base_url}/api/documents/?{urlencode(params)}"
         response = self._request("GET", url, token)
         self._raise_for_status(response)

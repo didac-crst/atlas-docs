@@ -185,6 +185,12 @@ def list_documents(
     q: str | None = Query(default=None),
     sort: str | None = Query(default=None),
     order: str = Query(default="desc"),
+    created_gte: str | None = Query(default=None),
+    created_lte: str | None = Query(default=None),
+    correspondent: str | None = Query(default=None),
+    document_type: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    completeness: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=UNCLASSIFIED_PAGE_SIZE, ge=1, le=UNCLASSIFIED_PAGE_SIZE),
     authorization: str = Depends(require_authorization),
@@ -206,6 +212,12 @@ def list_documents(
             classification=classification,
             sort=sort,
             order=order,
+            created_gte=created_gte,
+            created_lte=created_lte,
+            correspondent=correspondent,
+            document_type=document_type,
+            tag=tag,
+            completeness=completeness,
         )
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc

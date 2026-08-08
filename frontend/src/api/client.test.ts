@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildDocumentsQuery,
   filterConcepts,
+  formatCountStat,
   jobNeedsPolling,
+  relationshipTypesForTarget,
   summarizeBulkResults,
 } from "../api/client";
 
@@ -41,6 +43,28 @@ describe("buildDocumentsQuery", () => {
       }),
     ).toBe("page=1&q=payslip&classification=unclassified&sort=title&order=asc");
   });
+
+  it("encodes date, correspondent, type, tag, and completeness filters", () => {
+    expect(
+      buildDocumentsQuery({
+        page: 1,
+        created_gte: "2026-01-01",
+        created_lte: "2026-12-31",
+        correspondent: "Airbus",
+        document_type: "Payslip",
+        tag: "hr",
+        completeness: "partial",
+        sort: "correspondent",
+        order: "asc",
+      }),
+    ).toBe(
+      "page=1&sort=correspondent&order=asc&created_gte=2026-01-01&created_lte=2026-12-31&correspondent=Airbus&document_type=Payslip&tag=hr&completeness=partial",
+    );
+  });
+
+  it("omits completeness=any from the query string", () => {
+    expect(buildDocumentsQuery({ page: 1, completeness: "any" })).toBe("page=1");
+  });
 });
 
 describe("summarizeBulkResults", () => {
@@ -61,5 +85,28 @@ describe("jobNeedsPolling", () => {
     expect(jobNeedsPolling({ state: "PROCESSING" })).toBe(true);
     expect(jobNeedsPolling({ state: "READY" })).toBe(false);
     expect(jobNeedsPolling({ state: "FAILED" })).toBe(false);
+  });
+});
+
+describe("relationshipTypesForTarget", () => {
+  const types = [
+    { code: "source-country", name: "Source Country", target_ontology: "country", directionality: "directed", inverse: null },
+    { code: "derived-from", name: "Derived From", target_ontology: null, directionality: "directed", inverse: "has-derivative" },
+  ];
+
+  it("filters document vs concept relationship types", () => {
+    expect(relationshipTypesForTarget(types, "document").map((t) => t.code)).toEqual([
+      "derived-from",
+    ]);
+    expect(relationshipTypesForTarget(types, "concept").map((t) => t.code)).toEqual([
+      "source-country",
+    ]);
+  });
+});
+
+describe("formatCountStat", () => {
+  it("appends + when capped", () => {
+    expect(formatCountStat({ count: 25, capped: true })).toBe("25+");
+    expect(formatCountStat({ count: 3, capped: false })).toBe("3");
   });
 });

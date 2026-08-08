@@ -12,9 +12,10 @@ Historical milestone plans live under [archive/](archive/).
 - Password login → server-side token; PostgreSQL sessions; encrypted job tokens
 - Durable async ingestion worker (`atlasdocs worker ingest`)
 
-Design contract:
-[v0.5 ingestion & classification spec](v0.5-ingestion-classification-spec.md)
-· [ADR 0002](adr/0002-v05-session-ingest-security.md).
+Design contracts:
+[v0.5 ingestion & classification](v0.5-ingestion-classification-spec.md)
+· [ADR 0002](adr/0002-v05-session-ingest-security.md)
+· [v0.5 product UX refinement](v0.5-product-ux-refinement.md) (home summaries, entity autocomplete, document header).
 
 ## Explicitly deferred
 

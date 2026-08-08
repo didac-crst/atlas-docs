@@ -43,7 +43,8 @@ export type QueuePage = {
 };
 
 export type ClassificationFilter = "unclassified" | "classified" | "any";
-export type DocumentSort = "created" | "title";
+export type CompletenessFilter = "empty" | "partial" | "complete" | "any";
+export type DocumentSort = "created" | "title" | "correspondent" | "added";
 export type SortOrder = "asc" | "desc";
 
 export type DocumentListParams = {
@@ -52,6 +53,12 @@ export type DocumentListParams = {
   classification?: ClassificationFilter;
   sort?: DocumentSort;
   order?: SortOrder;
+  created_gte?: string;
+  created_lte?: string;
+  correspondent?: string;
+  document_type?: string;
+  tag?: string;
+  completeness?: CompletenessFilter;
   /** Legacy flag when `classification` is omitted. */
   unclassified?: boolean;
 };
@@ -67,6 +74,43 @@ export type RelationshipType = {
 export type Concept = {
   code: string;
   name: string;
+};
+
+export type CountStat = {
+  count: number;
+  capped: boolean;
+};
+
+export type RecentDocument = {
+  label: string;
+  entity_id: string | null;
+  href: string;
+  created_date: string | null;
+};
+
+export type RecentKnowledge = {
+  label: string;
+  relationship_type: string;
+  href: string;
+};
+
+export type HomeSummary = {
+  needs_classification: CountStat;
+  needs_review: CountStat;
+  failed_ingestion: CountStat;
+  reconciliation_issues: CountStat;
+  recent_documents: RecentDocument[];
+  recent_knowledge: RecentKnowledge[];
+};
+
+export type EntitySearchType = "document" | "concept" | "any";
+
+export type EntitySearchHit = {
+  id: string;
+  label: string;
+  entity_type: string;
+  subtitle: string | null;
+  open_url: string | null;
 };
 
 export type ReconcileSummary = {
@@ -179,8 +223,7 @@ export async function apiFetch<T>(
 export function buildDocumentsQuery(params: DocumentListParams = {}): string {
   const search = new URLSearchParams();
   const page = params.page ?? 1;
-  if (page !== 1) search.set("page", String(page));
-  else search.set("page", String(page));
+  search.set("page", String(page));
 
   if (params.q?.trim()) search.set("q", params.q.trim());
 
@@ -192,6 +235,14 @@ export function buildDocumentsQuery(params: DocumentListParams = {}): string {
 
   if (params.sort) search.set("sort", params.sort);
   if (params.order) search.set("order", params.order);
+  if (params.created_gte?.trim()) search.set("created_gte", params.created_gte.trim());
+  if (params.created_lte?.trim()) search.set("created_lte", params.created_lte.trim());
+  if (params.correspondent?.trim()) search.set("correspondent", params.correspondent.trim());
+  if (params.document_type?.trim()) search.set("document_type", params.document_type.trim());
+  if (params.tag?.trim()) search.set("tag", params.tag.trim());
+  if (params.completeness && params.completeness !== "any") {
+    search.set("completeness", params.completeness);
+  }
 
   return search.toString();
 }
@@ -223,6 +274,22 @@ export function disconnect(csrfToken: string) {
     },
     csrfToken,
   );
+}
+
+export function fetchHome() {
+  return apiFetch<HomeSummary>("/ui/api/home");
+}
+
+export function searchEntities(
+  q: string,
+  options: { entity_type?: EntitySearchType; ontology?: string | null } = {},
+) {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (options.entity_type) params.set("entity_type", options.entity_type);
+  if (options.ontology) params.set("ontology", options.ontology);
+  const query = params.toString();
+  return apiFetch<EntitySearchHit[]>(`/ui/api/entities/search${query ? `?${query}` : ""}`);
 }
 
 export function fetchDocuments(params: DocumentListParams = {}) {
@@ -346,4 +413,26 @@ export function summarizeBulkResults(results: BulkRelationshipResult[]): string 
 
 export function jobNeedsPolling(job: Pick<IngestJob, "state">): boolean {
   return job.state === "UPLOADING" || job.state === "PROCESSING";
+}
+
+/** Document-to-document relationship type codes. */
+export const DOCUMENT_TARGET_RELATIONSHIP_CODES = new Set([
+  "derived-from",
+  "has-derivative",
+  "replies-to",
+  "answered-by",
+]);
+
+export function relationshipTypesForTarget(
+  types: RelationshipType[],
+  targetKind: "concept" | "document",
+): RelationshipType[] {
+  if (targetKind === "document") {
+    return types.filter((item) => DOCUMENT_TARGET_RELATIONSHIP_CODES.has(item.code));
+  }
+  return types.filter((item) => !DOCUMENT_TARGET_RELATIONSHIP_CODES.has(item.code));
+}
+
+export function formatCountStat(stat: CountStat): string {
+  return `${stat.count}${stat.capped ? "+" : ""}`;
 }

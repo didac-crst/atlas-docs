@@ -182,6 +182,10 @@ class FakePaperlessTransport(httpx.BaseTransport):
             page_size = int(query.get("page_size", [str(UNCLASSIFIED_PAGE_SIZE)])[0])
             q = (query.get("query") or [""])[0].strip().lower()
             ordering = (query.get("ordering") or [""])[0]
+            created_gte = (query.get("created__date__gte") or [""])[0]
+            created_lte = (query.get("created__date__lte") or [""])[0]
+            correspondent_q = (query.get("correspondent__name__icontains") or [""])[0].lower()
+            doc_type_q = (query.get("document_type__name__icontains") or [""])[0].lower()
             ordered = list(self.documents.values())
             if q:
                 ordered = [
@@ -189,12 +193,52 @@ class FakePaperlessTransport(httpx.BaseTransport):
                     for item in ordered
                     if q in str(item.get("title") or "").lower()
                 ]
+            if created_gte:
+                ordered = [
+                    item
+                    for item in ordered
+                    if str(item.get("created_date") or "") >= created_gte
+                ]
+            if created_lte:
+                ordered = [
+                    item
+                    for item in ordered
+                    if str(item.get("created_date") or "") <= created_lte
+                ]
+            if correspondent_q:
+                filtered = []
+                for item in ordered:
+                    cid = item.get("correspondent")
+                    name = ""
+                    if isinstance(cid, int):
+                        name = str(self.correspondents.get(cid, {}).get("name") or "")
+                    if correspondent_q in name.lower():
+                        filtered.append(item)
+                ordered = filtered
+            if doc_type_q:
+                filtered = []
+                for item in ordered:
+                    tid = item.get("document_type")
+                    name = ""
+                    if isinstance(tid, int):
+                        name = str(self.document_types.get(tid, {}).get("name") or "")
+                    if doc_type_q in name.lower():
+                        filtered.append(item)
+                ordered = filtered
             reverse = ordering.startswith("-")
             field = ordering.lstrip("-") or "id"
-            if field in {"created", "created_date"}:
+            if field in {"created", "created_date", "added"}:
                 ordered.sort(key=lambda item: item.get("created_date") or "", reverse=reverse)
             elif field == "title":
                 ordered.sort(key=lambda item: (item.get("title") or "").lower(), reverse=reverse)
+            elif field == "correspondent__name":
+                def _corr_name(item: dict) -> str:
+                    cid = item.get("correspondent")
+                    if isinstance(cid, int):
+                        return str(self.correspondents.get(cid, {}).get("name") or "").lower()
+                    return ""
+
+                ordered.sort(key=_corr_name, reverse=reverse)
             else:
                 ordered.sort(key=lambda item: item["id"], reverse=reverse)
             start = (page - 1) * page_size

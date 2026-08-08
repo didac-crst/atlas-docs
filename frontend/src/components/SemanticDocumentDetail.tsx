@@ -1,4 +1,4 @@
-import { ExternalLink, Trash2 } from "lucide-react";
+import { ExternalLink, Link2, Trash2 } from "lucide-react";
 import {
   fetchDocument,
   removeRelationship,
@@ -11,9 +11,50 @@ type Props = {
   csrfToken: string;
   onRemoved: (document: DocumentDetail, message: string) => Promise<void>;
   onError: (message: string) => void;
+  onAddRelationship?: () => void;
 };
 
-export function SemanticDocumentDetail({ document, csrfToken, onRemoved, onError }: Props) {
+const CONTEXT_RELATIONSHIP_PRIORITY = ["source-country", "document-type", "issued-by"] as const;
+
+export function documentDisplayTitle(document: Pick<DocumentDetail, "title">): string {
+  const title = document.title?.trim();
+  return title || "Untitled document";
+}
+
+export function documentContextLine(document: DocumentDetail): string {
+  const parts: string[] = [];
+  const used = new Set<string>();
+
+  for (const code of CONTEXT_RELATIONSHIP_PRIORITY) {
+    const rel = document.relationships.find((item) => item.type === code);
+    if (rel?.target) {
+      parts.push(rel.target);
+      used.add(code);
+    }
+  }
+
+  if (!used.has("document-type") && document.document_type) {
+    parts.push(document.document_type);
+  }
+  if (!used.has("issued-by") && document.correspondent) {
+    parts.push(document.correspondent);
+  }
+
+  if (document.created_date) {
+    const year = document.created_date.slice(0, 4);
+    if (/^\d{4}$/.test(year)) parts.push(year);
+  }
+
+  return parts.join(" · ");
+}
+
+export function SemanticDocumentDetail({
+  document,
+  csrfToken,
+  onRemoved,
+  onError,
+  onAddRelationship,
+}: Props) {
   async function onDelete(relationshipId: string) {
     try {
       await removeRelationship(relationshipId, csrfToken);
@@ -24,44 +65,65 @@ export function SemanticDocumentDetail({ document, csrfToken, onRemoved, onError
     }
   }
 
+  const context = documentContextLine(document);
+
   return (
     <div>
-      <h1 id="detail-title" className="doc-title">
-        {document.title || `Document ${document.paperless_document_id}`}
-      </h1>
-      <div className="paperless-strip" aria-label="Paperless authority">
-        <span className="label">Paperless authority</span>
-        <div>
-          {[document.created_date, document.correspondent, document.document_type]
-            .filter(Boolean)
-            .join(" · ") || "No metadata from Paperless"}
+      <header className="doc-header">
+        <h1 id="detail-title" className="doc-title">
+          {documentDisplayTitle(document)}
+        </h1>
+        {context ? <p className="doc-context">{context}</p> : null}
+        <div className="doc-actions">
+          {onAddRelationship ? (
+            <button type="button" className="btn btn-secondary" onClick={onAddRelationship}>
+              <Link2 size={16} aria-hidden /> Add relationship
+            </button>
+          ) : (
+            <a className="btn btn-secondary" href="#relationship-composer">
+              <Link2 size={16} aria-hidden /> Add relationship
+            </a>
+          )}
+          {document.open_url ? (
+            <a
+              href={document.open_url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="btn btn-primary"
+            >
+              <ExternalLink size={16} aria-hidden /> Open original in Paperless
+            </a>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled
+              title="PAPERLESS_PUBLIC_URL is not configured"
+            >
+              <ExternalLink size={16} aria-hidden /> Open original in Paperless
+            </button>
+          )}
         </div>
-        {document.open_url ? (
-          <a
-            href={document.open_url}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="btn btn-secondary"
-          >
-            <ExternalLink size={16} aria-hidden /> Open in Paperless
-          </a>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled
-            title="PAPERLESS_PUBLIC_URL is not configured"
-          >
-            <ExternalLink size={16} aria-hidden /> Open in Paperless
-          </button>
-        )}
-        {document.entity_id ? (
-          <details>
-            <summary>Technical</summary>
-            <code>{document.entity_id}</code>
-          </details>
-        ) : null}
-      </div>
+        <details className="tech-details">
+          <summary>Technical details</summary>
+          <dl>
+            <div>
+              <dt>Paperless document id</dt>
+              <dd>
+                <code>{document.paperless_document_id}</code>
+              </dd>
+            </div>
+            {document.entity_id ? (
+              <div>
+                <dt>Entity UUID</dt>
+                <dd>
+                  <code>{document.entity_id}</code>
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+        </details>
+      </header>
 
       <h2>Relationships</h2>
       {document.relationships.length === 0 ? (

@@ -177,7 +177,7 @@ export function App() {
             path="/"
             element={
               authenticated && session ? (
-                <HomePage />
+                <HomePage session={session} />
               ) : (
                 <Navigate to="/connect" replace />
               )
