@@ -14,12 +14,13 @@ Historical milestone plans live under [archive/](archive/).
 ## Next (v0.5)
 
 Specification (design only until implemented):
-[v0.5 ingestion & classification spec](v0.5-ingestion-classification-spec.md).
+[v0.5 ingestion & classification spec](v0.5-ingestion-classification-spec.md)
+· security decisions [ADR 0002](adr/0002-v05-session-ingest-security.md).
 
 Planned themes:
 
 - Paperless username/password → server-side token exchange
-- Durable asynchronous ingestion jobs (upload forward to Paperless)
+- Durable PostgreSQL sessions + asynchronous ingestion jobs
 - Searchable / filterable classification workbench and bulk assignment
 - Task-oriented home navigation
 
@@ -38,7 +39,7 @@ Not implemented and not implied by current docs:
 - Evidence / case management product surface
 - Bulk legacy migration tooling beyond Alembic schema history
 - Automatic deletion of semantic data when Paperless removes documents
-- Multi-replica durable UI sessions / Celery-style queues (see v0.5 spec deferrals)
+- Background workers beyond the single v0.5 ingest worker; webhook ingestion
 - Private-deployment-specific scheduling, tunnels, or secret wiring
 
 ## Public product rule
