@@ -79,7 +79,10 @@ class FakePaperlessTransport(httpx.BaseTransport):
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path.rstrip("/")
-        self.calls.append(f"{request.method} {request.url.path}?{request.url.query}")
+        query = request.url.query
+        if isinstance(query, (bytes, bytearray)):
+            query = query.decode("ascii")
+        self.calls.append(f"{request.method} {request.url.path}?{query}")
 
         if path.endswith("/api/token") and request.method == "POST":
             if self.token_exchange_status is not None:

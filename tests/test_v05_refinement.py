@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import parse_qs, urlparse
+
 from fastapi.testclient import TestClient
 
 from tests.conftest import AUTH
@@ -91,9 +93,14 @@ def test_unclassified_oldest_uses_ascending_order(
     assert response.status_code == 200
     list_calls = [call for call in paperless_transport.calls if "GET /api/documents/" in call]
     assert list_calls
-    assert any("ordering=created" in call for call in list_calls)
-    assert all("ordering=-created" not in call for call in list_calls)
-
+    orderings: list[str] = []
+    for call in list_calls:
+        query = parse_qs(urlparse(call.split(" ", 1)[1]).query)
+        values = query.get("ordering", [])
+        assert values, call
+        orderings.append(values[0])
+    assert orderings
+    assert all(value == "created" for value in orderings)
 
 def test_relationship_via_target_entity_id(client: TestClient) -> None:
     _connect(client)

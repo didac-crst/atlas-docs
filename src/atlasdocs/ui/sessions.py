@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Request, Response
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from atlasdocs.config import MAX_UI_SESSIONS, get_settings
@@ -19,6 +20,11 @@ from atlasdocs.security.tokens import (
     new_session_id,
     token_fingerprint,
 )
+
+# In-process serialization for create() (uvicorn workers / TestClient threads).
+_SESSION_CREATE_LOCK = threading.Lock()
+# Stable advisory lock key for cross-process PostgreSQL serialization.
+_SESSION_CAP_ADVISORY_LOCK_KEY = 0x41544C44  # 'ATLD'
 
 
 @dataclass
@@ -52,6 +58,15 @@ class DbSessionStore:
 
     def _settings_key(self) -> str:
         return get_settings().token_encryption_key
+
+    def _lock_for_create(self) -> None:
+        """Serialize purge/cap/insert for the current transaction."""
+        bind = self._db.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            self._db.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": _SESSION_CAP_ADVISORY_LOCK_KEY},
+            )
 
     def _purge_expired(self) -> None:
         self._db.execute(delete(UiSessionRow).where(UiSessionRow.expires_at <= utcnow()))
@@ -100,26 +115,28 @@ class DbSessionStore:
         username_label: str | None = None,
     ) -> UiSession:
         settings = get_settings()
-        self._purge_expired()
-        self._enforce_cap()
-        ciphertext = None
-        fingerprint = None
-        if paperless_authorization:
-            ciphertext = encrypt_token(paperless_authorization, key=self._settings_key())
-            fingerprint = token_fingerprint(paperless_authorization)
-        row = UiSessionRow(
-            id=new_session_id(),
-            csrf_token=new_csrf_token(),
-            expires_at=utcnow() + timedelta(seconds=settings.session_max_age_seconds),
-            paperless_authorization_ciphertext=ciphertext,
-            token_fingerprint=fingerprint,
-            username_label=username_label,
-            created_at=utcnow(),
-            updated_at=utcnow(),
-        )
-        self._db.add(row)
-        self._db.flush()
-        return self._to_view(row)
+        with _SESSION_CREATE_LOCK:
+            self._lock_for_create()
+            self._purge_expired()
+            self._enforce_cap()
+            ciphertext = None
+            fingerprint = None
+            if paperless_authorization:
+                ciphertext = encrypt_token(paperless_authorization, key=self._settings_key())
+                fingerprint = token_fingerprint(paperless_authorization)
+            row = UiSessionRow(
+                id=new_session_id(),
+                csrf_token=new_csrf_token(),
+                expires_at=utcnow() + timedelta(seconds=settings.session_max_age_seconds),
+                paperless_authorization_ciphertext=ciphertext,
+                token_fingerprint=fingerprint,
+                username_label=username_label,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            self._db.add(row)
+            self._db.flush()
+            return self._to_view(row)
 
     def get(self, session_id: str | None) -> UiSession | None:
         if not session_id:

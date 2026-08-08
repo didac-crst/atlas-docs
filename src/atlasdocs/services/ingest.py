@@ -227,7 +227,11 @@ class IngestionWorker:
         job_id = job.id
         # Persist the lease before any Paperless I/O so a crash mid-call cannot
         # leave the job unlocked for a second worker while upload is in flight.
-        self._session.commit()
+        try:
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
         try:
             job = self._session.get(IngestionJob, job_id)
             if job is None:
@@ -326,6 +330,8 @@ class IngestionWorker:
                 )
             job.paperless_task_id = task_id
             job.state = IngestionJobState.processing
+            if job.processing_started_at is None:
+                job.processing_started_at = utcnow()
             job.updated_at = utcnow()
             job.error_code = None
             job.error_message = None
@@ -357,7 +363,11 @@ class IngestionWorker:
         if not job.paperless_task_id:
             self._fail(job, "missing_task", "Missing Paperless task id")
             return
-        if as_aware(job.created_at) + timedelta(
+        if job.processing_started_at is None:
+            # Legacy rows or interrupted upgrades: start the clock on first poll.
+            job.processing_started_at = utcnow()
+            self._session.flush()
+        if as_aware(job.processing_started_at) + timedelta(
             seconds=self._settings.ingest_processing_timeout_seconds
         ) < utcnow():
             self._fail(job, "processing_timeout", "Processing timed out")

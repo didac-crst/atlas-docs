@@ -1,5 +1,8 @@
+import threading
+
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import func, select
 
 from atlasdocs.config import (
     DEFAULT_DATABASE_PASSWORD,
@@ -9,6 +12,7 @@ from atlasdocs.config import (
     get_settings,
 )
 from atlasdocs.db.models import Base
+from atlasdocs.db.models import UiSession as UiSessionRow
 from atlasdocs.db.session import get_engine, get_session_factory, reset_engine
 from atlasdocs.security.tokens import DEFAULT_TOKEN_ENCRYPTION_KEY as TOK_DEFAULT
 from atlasdocs.ui.sessions import DbSessionStore
@@ -203,7 +207,51 @@ def test_undecryptable_session_is_dropped(
         monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "rotated-key")
         get_settings.cache_clear()
         assert store.get(session_id) is None
+        assert db.get(UiSessionRow, session_id) is None
         assert store.get(session_id) is None
+    finally:
+        db.close()
+        reset_engine()
+
+
+def test_concurrent_create_respects_session_cap(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SESSION_MAX_AGE_SECONDS", "3600")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-key")
+    monkeypatch.setenv("ATLASDOCS_ENV", "development")
+    get_settings.cache_clear()
+    reset_engine()
+    engine = get_engine(f"sqlite+pysqlite:///{tmp_path / 'sess.db'}")
+    Base.metadata.create_all(engine)
+    factory = get_session_factory()
+    cap = 5
+    workers = 12
+    barrier = threading.Barrier(workers)
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        db = factory()
+        try:
+            barrier.wait(timeout=5)
+            DbSessionStore(db, max_sessions=cap).create()
+            db.commit()
+        except BaseException as exc:  # noqa: BLE001 — collect for assertion
+            errors.append(exc)
+            db.rollback()
+        finally:
+            db.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(workers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    assert not errors
+    db = factory()
+    try:
+        count = int(db.scalar(select(func.count()).select_from(UiSessionRow)) or 0)
+        assert count <= cap
     finally:
         db.close()
         reset_engine()

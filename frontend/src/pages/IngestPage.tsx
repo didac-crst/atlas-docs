@@ -27,10 +27,12 @@ export function IngestPage({ session, onSession }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [pollFailed, setPollFailed] = useState(false);
 
   const refreshJobs = useCallback(async () => {
     const page = await fetchIngestJobs();
     setJobs(page.items);
+    setPollFailed(false);
     return page.items;
   }, []);
 
@@ -57,7 +59,8 @@ export function IngestPage({ session, onSession }: Props) {
     };
   }, [navigate, refreshJobs]);
 
-  const needsPoll = jobs.some(jobNeedsPolling);
+  const hasActiveJobs = jobs.some(jobNeedsPolling);
+  const needsPoll = hasActiveJobs && !pollFailed;
 
   useEffect(() => {
     if (!needsPoll) return;
@@ -74,7 +77,11 @@ export function IngestPage({ session, onSession }: Props) {
             return;
           }
           failures += 1;
-          if (failures >= 5) window.clearInterval(handle);
+          if (failures >= 5) {
+            window.clearInterval(handle);
+            setPollFailed(true);
+            setError(err instanceof Error ? err.message : "Failed to refresh jobs");
+          }
         });
     }, POLL_MS);
     return () => window.clearInterval(handle);

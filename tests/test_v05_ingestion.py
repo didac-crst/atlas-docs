@@ -316,3 +316,55 @@ def test_logout_keeps_inflight_job_token_until_terminal(
         assert job.token_ciphertext is None
     finally:
         db.close()
+
+
+def test_processing_timeout_ignores_queue_delay(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    paperless_transport.task_auto_succeed = False
+    csrf = _connect(client)
+    upload = client.post(
+        "/ui/api/ingest",
+        headers={"X-CSRF-Token": csrf},
+        files={"document": ("slow.pdf", b"slow-bytes", "application/pdf")},
+    )
+    assert upload.status_code == 202
+    job_id = uuid.UUID(upload.json()["id"])
+
+    db = get_session_factory()()
+    try:
+        worker = IngestionWorker(
+            db,
+            PaperlessClient(base_url="http://paperless.test", transport=paperless_transport),
+        )
+        assert worker.run_once() is True
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        assert job.state == IngestionJobState.processing
+        assert job.processing_started_at is not None
+        started = job.processing_started_at
+
+        # Queue delay before Paperless acceptance must not consume the timeout.
+        job.created_at = utcnow() - timedelta(hours=5)
+        job.next_attempt_at = utcnow() - timedelta(seconds=1)
+        job.locked_at = None
+        db.commit()
+        assert worker.run_once() is True
+        db.refresh(job)
+        assert job.state == IngestionJobState.processing
+        assert job.processing_started_at == started
+
+        # Deadline is anchored to processing_started_at, not polling updated_at.
+        job.processing_started_at = utcnow() - timedelta(
+            seconds=get_settings().ingest_processing_timeout_seconds + 5
+        )
+        job.updated_at = utcnow()
+        job.next_attempt_at = utcnow() - timedelta(seconds=1)
+        job.locked_at = None
+        db.commit()
+        assert worker.run_once() is True
+        db.refresh(job)
+        assert job.state == IngestionJobState.failed
+        assert job.error_code == "processing_timeout"
+    finally:
+        db.close()
