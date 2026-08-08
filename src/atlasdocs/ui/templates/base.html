@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AtlasDocs{% endblock %}</title>
+  <link rel="stylesheet" href="/static/workbench.css">
+</head>
+<body>
+  <header class="site-header">
+    <p class="brand">AtlasDocs</p>
+    <p class="tagline">Classify documents beside Paperless</p>
+    {% if authenticated %}
+    <form class="disconnect" method="post" action="/ui/disconnect">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Disconnect</button>
+    </form>
+    {% endif %}
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

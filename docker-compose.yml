@@ -26,6 +26,9 @@ services:
       DATABASE_USER: atlasdocs
       DATABASE_PASSWORD: atlasdocs
       PAPERLESS_BASE_URL: http://host.docker.internal:8000
+      ATLASDOCS_ENV: development
+      SESSION_SECRET: dev-only-change-me
+      SESSION_SECURE: "false"
       SEED_PATH: /app/config/seed/v0.1.yaml
     depends_on:
       db:
