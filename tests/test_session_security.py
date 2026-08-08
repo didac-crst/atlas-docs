@@ -247,6 +247,7 @@ def test_concurrent_create_respects_session_cap(
         thread.start()
     for thread in threads:
         thread.join(timeout=10)
+    assert all(not thread.is_alive() for thread in threads)
     assert not errors
     db = factory()
     try:

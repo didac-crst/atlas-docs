@@ -6,7 +6,7 @@ from datetime import timedelta
 from fastapi.testclient import TestClient
 
 from atlasdocs.config import get_settings
-from atlasdocs.db.models import IngestionJob, IngestionJobState, utcnow
+from atlasdocs.db.models import IngestionJob, IngestionJobState, as_aware, utcnow
 from atlasdocs.db.session import get_session_factory
 from atlasdocs.security.tokens import decrypt_token, encrypt_token, token_fingerprint
 from atlasdocs.services.ingest import IngestionWorker, spool_path_for
@@ -333,19 +333,29 @@ def test_processing_timeout_ignores_queue_delay(
 
     db = get_session_factory()()
     try:
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        # Age the queued job before Paperless acceptance.
+        queued_created_at = utcnow() - timedelta(hours=5)
+        job.created_at = queued_created_at
+        job.next_attempt_at = utcnow() - timedelta(seconds=1)
+        job.locked_at = None
+        db.commit()
+
         worker = IngestionWorker(
             db,
             PaperlessClient(base_url="http://paperless.test", transport=paperless_transport),
         )
         assert worker.run_once() is True
-        job = db.get(IngestionJob, job_id)
-        assert job is not None
+        db.refresh(job)
         assert job.state == IngestionJobState.processing
         assert job.processing_started_at is not None
+        assert as_aware(job.processing_started_at) > as_aware(queued_created_at)
+        assert as_aware(job.created_at) == as_aware(queued_created_at)
         started = job.processing_started_at
 
-        # Queue delay before Paperless acceptance must not consume the timeout.
-        job.created_at = utcnow() - timedelta(hours=5)
+        # Polling must not extend the processing deadline.
+        job.updated_at = utcnow()
         job.next_attempt_at = utcnow() - timedelta(seconds=1)
         job.locked_at = None
         db.commit()
@@ -354,7 +364,7 @@ def test_processing_timeout_ignores_queue_delay(
         assert job.state == IngestionJobState.processing
         assert job.processing_started_at == started
 
-        # Deadline is anchored to processing_started_at, not polling updated_at.
+        # Deadline is anchored to processing_started_at, not created_at/updated_at.
         job.processing_started_at = utcnow() - timedelta(
             seconds=get_settings().ingest_processing_timeout_seconds + 5
         )
