@@ -8,7 +8,6 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
-    Integer,
     String,
     UniqueConstraint,
     Uuid,
@@ -24,11 +23,22 @@ class Base(DeclarativeBase):
     pass
 
 
+class EntityType(str, enum.Enum):
+    document = "document"
+    concept = "concept"
+
+
+class RelationshipDirectionality(str, enum.Enum):
+    directed = "directed"
+    symmetric = "symmetric"
+
+
 class RelationshipOrigin(str, enum.Enum):
     manual = "manual"
-    rule = "rule"
     import_ = "import"
+    deterministic_rule = "deterministic-rule"
     llm = "llm"
+    mcp = "mcp"
 
 
 class RelationshipStatus(str, enum.Enum):
@@ -36,7 +46,20 @@ class RelationshipStatus(str, enum.Enum):
     confirmed = "confirmed"
 
 
-# Store enum values as strings for PostgreSQL + SQLite test portability.
+ENTITY_TYPE_ENUM = Enum(
+    EntityType,
+    name="entity_type",
+    values_callable=lambda obj: [e.value for e in obj],
+    native_enum=False,
+    length=64,
+)
+DIRECTIONALITY_ENUM = Enum(
+    RelationshipDirectionality,
+    name="relationship_directionality",
+    values_callable=lambda obj: [e.value for e in obj],
+    native_enum=False,
+    length=32,
+)
 ORIGIN_ENUM = Enum(
     RelationshipOrigin,
     name="relationship_origin",
@@ -52,30 +75,55 @@ STATUS_ENUM = Enum(
     length=32,
 )
 
+EXTERNAL_SYSTEM_PAPERLESS = "paperless"
+
+
+def parse_relationship_origin(value: str) -> RelationshipOrigin:
+    """Accept architecture vocabulary plus legacy ``rule`` from v0.1/v0.2."""
+    if value == "rule":
+        return RelationshipOrigin.deterministic_rule
+    try:
+        return RelationshipOrigin(value)
+    except ValueError as exc:
+        raise ValueError(f"Unknown relationship origin '{value}'") from exc
+
 
 class Entity(Base):
     __tablename__ = "entities"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    entity_type: Mapped[EntityType] = mapped_column(ENTITY_TYPE_ENUM, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    document_reference: Mapped[DocumentReference | None] = relationship(
+    external_reference: Mapped[ExternalReference | None] = relationship(
         back_populates="entity", uselist=False
     )
-    relationships: Mapped[list[Relationship]] = relationship(back_populates="source_entity")
+    concept: Mapped[Concept | None] = relationship(back_populates="entity", uselist=False)
+    outgoing_relationships: Mapped[list[Relationship]] = relationship(
+        back_populates="source_entity",
+        foreign_keys="Relationship.source_entity_id",
+    )
+    incoming_relationships: Mapped[list[Relationship]] = relationship(
+        back_populates="target_entity",
+        foreign_keys="Relationship.target_entity_id",
+    )
 
 
-class DocumentReference(Base):
-    __tablename__ = "document_references"
+class ExternalReference(Base):
+    __tablename__ = "external_references"
+    __table_args__ = (
+        UniqueConstraint("system", "external_id", name="uq_external_reference_system_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     entity_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("entities.id", ondelete="CASCADE"), unique=True, nullable=False
     )
-    paperless_document_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    system: Mapped[str] = mapped_column(String(64), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    entity: Mapped[Entity] = relationship(back_populates="document_reference")
+    entity: Mapped[Entity] = relationship(back_populates="external_reference")
 
 
 class Ontology(Base):
@@ -92,13 +140,16 @@ class Concept(Base):
     __tablename__ = "concepts"
     __table_args__ = (UniqueConstraint("ontology_id", "code", name="uq_concept_ontology_code"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("entities.id", ondelete="CASCADE"), primary_key=True
+    )
     ontology_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("ontologies.id", ondelete="CASCADE"), nullable=False
     )
     code: Mapped[str] = mapped_column(String(128), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
 
+    entity: Mapped[Entity] = relationship(back_populates="concept")
     ontology: Mapped[Ontology] = relationship(back_populates="concepts")
 
 
@@ -111,8 +162,20 @@ class RelationshipType(Base):
     target_ontology_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("ontologies.id", ondelete="RESTRICT"), nullable=True
     )
+    directionality: Mapped[RelationshipDirectionality] = mapped_column(
+        DIRECTIONALITY_ENUM,
+        nullable=False,
+        default=RelationshipDirectionality.directed,
+    )
+    inverse_relationship_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("relationship_types.id", ondelete="SET NULL"), nullable=True
+    )
 
     target_ontology: Mapped[Ontology | None] = relationship()
+    inverse_relationship_type: Mapped[RelationshipType | None] = relationship(
+        remote_side=[id],
+        foreign_keys=[inverse_relationship_type_id],
+    )
 
 
 class Relationship(Base):
@@ -121,7 +184,7 @@ class Relationship(Base):
         UniqueConstraint(
             "source_entity_id",
             "relationship_type_id",
-            "target_concept_id",
+            "target_entity_id",
             name="uq_relationship_triple",
         ),
     )
@@ -133,8 +196,8 @@ class Relationship(Base):
     relationship_type_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("relationship_types.id", ondelete="RESTRICT"), nullable=False
     )
-    target_concept_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("concepts.id", ondelete="RESTRICT"), nullable=False
+    target_entity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False
     )
     origin: Mapped[RelationshipOrigin] = mapped_column(
         ORIGIN_ENUM, nullable=False, default=RelationshipOrigin.manual
@@ -143,7 +206,17 @@ class Relationship(Base):
         STATUS_ENUM, nullable=False, default=RelationshipStatus.confirmed
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    source_entity: Mapped[Entity] = relationship(back_populates="relationships")
+    source_entity: Mapped[Entity] = relationship(
+        back_populates="outgoing_relationships",
+        foreign_keys=[source_entity_id],
+    )
+    target_entity: Mapped[Entity] = relationship(
+        back_populates="incoming_relationships",
+        foreign_keys=[target_entity_id],
+    )
     relationship_type: Mapped[RelationshipType] = relationship()
-    target_concept: Mapped[Concept] = relationship()

@@ -7,10 +7,18 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from atlasdocs.api import create_app
 from atlasdocs.config import UNCLASSIFIED_PAGE_SIZE, get_settings
-from atlasdocs.db.models import Base, Concept, DocumentReference, RelationshipType
+from atlasdocs.db.models import (
+    EXTERNAL_SYSTEM_PAPERLESS,
+    Base,
+    Concept,
+    ExternalReference,
+    Relationship,
+    RelationshipType,
+)
 from atlasdocs.db.seed import seed_from_path
 from atlasdocs.db.session import get_db, get_engine, get_session_factory, reset_engine
 from atlasdocs.services.paperless import PaperlessClient
@@ -157,7 +165,18 @@ def test_seed_loads_ontologies_and_relationship_types(client: TestClient) -> Non
         concepts = {c.name for c in session.scalars(select(Concept))}
         assert concepts == {"France", "Germany", "Spain", "Payslip", "Invoice"}
         types = {t.code for t in session.scalars(select(RelationshipType))}
-        assert types == {"source-country", "document-type", "concerns"}
+        assert types == {
+            "source-country",
+            "document-type",
+            "concerns",
+            "related-to",
+            "replies-to",
+            "answered-by",
+        }
+        for concept in session.scalars(select(Concept)):
+            assert concept.entity is not None
+            assert concept.entity.entity_type.value == "concept"
+            assert concept.entity.id == concept.id
     finally:
         session.close()
 
@@ -172,7 +191,7 @@ def test_seed_is_idempotent(tmp_path: Path) -> None:
         seed_from_path(session, SEED_PATH)
         session.commit()
         assert len(list(session.scalars(select(Concept)))) == 5
-        assert len(list(session.scalars(select(RelationshipType)))) == 3
+        assert len(list(session.scalars(select(RelationshipType)))) == 6
     finally:
         session.close()
         reset_engine()
@@ -203,12 +222,16 @@ def test_create_and_get_relationship(client: TestClient) -> None:
     session = get_session_factory()()
     try:
         reference = session.scalar(
-            select(DocumentReference).where(DocumentReference.paperless_document_id == 184)
+            select(ExternalReference).where(
+                ExternalReference.system == EXTERNAL_SYSTEM_PAPERLESS,
+                ExternalReference.external_id == "184",
+            )
         )
         assert reference is not None
         assert str(reference.entity_id) != "184"
-        assert reference.paperless_document_id == 184
+        assert reference.external_id == "184"
         assert reference.entity_id != reference.id
+        assert body["entity_id"] == str(reference.entity_id)
     finally:
         session.close()
 
@@ -224,7 +247,10 @@ def test_missing_paperless_document(client: TestClient, paperless_transport: Fak
     try:
         assert (
             session.scalar(
-                select(DocumentReference).where(DocumentReference.paperless_document_id == 999)
+                select(ExternalReference).where(
+                    ExternalReference.system == EXTERNAL_SYSTEM_PAPERLESS,
+                    ExternalReference.external_id == "999",
+                )
             )
             is None
         )
@@ -388,10 +414,70 @@ def test_relationship_types_and_concepts(client: TestClient) -> None:
     types = client.get("/relationship-types", headers=AUTH)
     assert types.status_code == 200
     codes = {item["code"] for item in types.json()}
-    assert codes == {"source-country", "document-type", "concerns"}
+    assert codes == {
+        "source-country",
+        "document-type",
+        "concerns",
+        "related-to",
+        "replies-to",
+        "answered-by",
+    }
+    by_code = {item["code"]: item for item in types.json()}
+    assert by_code["related-to"]["directionality"] == "symmetric"
+    assert by_code["replies-to"]["inverse"] == "answered-by"
+    assert by_code["answered-by"]["inverse"] == "replies-to"
     concepts = client.get("/ontologies/country/concepts", headers=AUTH)
     assert concepts.status_code == 200
     assert {item["name"] for item in concepts.json()} == {"France", "Germany", "Spain"}
+
+
+def test_symmetric_relationship_creates_companion_edge(client: TestClient) -> None:
+    created = client.post(
+        "/documents/184/relationships",
+        headers=AUTH,
+        json={"relationship": "related-to", "target": "Germany"},
+    )
+    assert created.status_code == 201
+    assert len(created.json()["relationships"]) == 1
+    assert created.json()["relationships"][0]["type"] == "related-to"
+
+    session = get_session_factory()()
+    try:
+        edges = list(session.scalars(select(Relationship)))
+        assert len(edges) == 2
+        pairs = {(e.source_entity_id, e.target_entity_id) for e in edges}
+        forward = next(iter(pairs))
+        assert {(forward[1], forward[0])} == pairs - {forward}
+    finally:
+        session.close()
+
+
+def test_inverse_relationship_materializes_companion(client: TestClient) -> None:
+    created = client.post(
+        "/documents/184/relationships",
+        headers=AUTH,
+        json={"relationship": "replies-to", "target": "Germany"},
+    )
+    assert created.status_code == 201
+    assert created.json()["relationships"][0]["type"] == "replies-to"
+
+    session = get_session_factory()()
+    try:
+        edges = list(
+            session.scalars(
+                select(Relationship).options(
+                    joinedload(Relationship.relationship_type),
+                )
+            )
+        )
+        by_code = {e.relationship_type.code: e for e in edges}
+        assert set(by_code) == {"answered-by", "replies-to"}
+        forward = by_code["replies-to"]
+        inverse = by_code["answered-by"]
+        assert inverse.source_entity_id == forward.target_entity_id
+        assert inverse.target_entity_id == forward.source_entity_id
+    finally:
+        session.close()
 
 
 def test_create_relationship_accepts_concept_code(client: TestClient) -> None:

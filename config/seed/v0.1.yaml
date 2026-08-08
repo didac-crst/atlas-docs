@@ -20,10 +20,27 @@ relationship_types:
   - code: source-country
     name: Source Country
     target_ontology: country
+    directionality: directed
   - code: document-type
     name: Document Type
     target_ontology: document-type
+    directionality: directed
   - code: concerns
     name: Concerns
     # Any concept; resolved by name across ontologies.
     target_ontology: null
+    directionality: directed
+  - code: related-to
+    name: Related To
+    target_ontology: null
+    directionality: symmetric
+  - code: replies-to
+    name: Replies To
+    target_ontology: null
+    directionality: directed
+    inverse: answered-by
+  - code: answered-by
+    name: Answered By
+    target_ontology: null
+    directionality: directed
+    inverse: replies-to

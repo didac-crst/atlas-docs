@@ -9,11 +9,14 @@ from sqlalchemy.orm import Session, joinedload
 
 from atlasdocs.config import UNCLASSIFIED_MAX_UPSTREAM_PAGES, UNCLASSIFIED_PAGE_SIZE, get_settings
 from atlasdocs.db.models import (
+    EXTERNAL_SYSTEM_PAPERLESS,
     Concept,
-    DocumentReference,
     Entity,
+    EntityType,
+    ExternalReference,
     Ontology,
     Relationship,
+    RelationshipDirectionality,
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
@@ -96,6 +99,8 @@ class RelationshipTypeView:
     code: str
     name: str
     target_ontology: str | None
+    directionality: str
+    inverse: str | None
 
 
 @dataclass(frozen=True)
@@ -127,25 +132,40 @@ class DocumentService:
         except PaperlessError as exc:
             raise UpstreamError(str(exc)) from exc
 
-    def _get_or_create_document_reference(self, paperless_document_id: int) -> DocumentReference:
-        existing = self._session.scalar(
-            select(DocumentReference).where(
-                DocumentReference.paperless_document_id == paperless_document_id
+    def _paperless_external_id(self, paperless_document_id: int) -> str:
+        return str(paperless_document_id)
+
+    def _get_external_reference(self, paperless_document_id: int) -> ExternalReference | None:
+        return self._session.scalar(
+            select(ExternalReference).where(
+                ExternalReference.system == EXTERNAL_SYSTEM_PAPERLESS,
+                ExternalReference.external_id == self._paperless_external_id(paperless_document_id),
             )
         )
-        if existing is not None:
-            return existing
 
-        entity = Entity()
-        self._session.add(entity)
-        self._session.flush()
-        reference = DocumentReference(
-            entity_id=entity.id,
-            paperless_document_id=paperless_document_id,
-        )
-        self._session.add(reference)
-        self._session.flush()
-        return reference
+    def _get_or_create_document_entity(self, paperless_document_id: int) -> Entity:
+        existing = self._get_external_reference(paperless_document_id)
+        if existing is not None:
+            return existing.entity
+
+        try:
+            with self._session.begin_nested():
+                entity = Entity(entity_type=EntityType.document)
+                self._session.add(entity)
+                self._session.flush()
+                reference = ExternalReference(
+                    entity_id=entity.id,
+                    system=EXTERNAL_SYSTEM_PAPERLESS,
+                    external_id=self._paperless_external_id(paperless_document_id),
+                )
+                self._session.add(reference)
+                self._session.flush()
+                return entity
+        except IntegrityError:
+            existing = self._get_external_reference(paperless_document_id)
+            if existing is None:
+                raise
+            return existing.entity
 
     def _resolve_target_concept(
         self, relationship_type: RelationshipType, target: str
@@ -170,18 +190,27 @@ class DocumentService:
             raise ValidationError(f"Ambiguous target concept '{target}'")
         raise ValidationError(f"Unknown target concept '{target}'")
 
-    def _relationship_views(self, reference: DocumentReference | None) -> list[RelationshipView]:
-        if reference is None:
+    def _target_label(self, relationship: Relationship) -> str:
+        concept = relationship.target_entity.concept
+        if concept is not None:
+            return concept.name
+        external = relationship.target_entity.external_reference
+        if external is not None:
+            return f"{external.system}:{external.external_id}"
+        return str(relationship.target_entity_id)
+
+    def _relationship_views(self, entity: Entity | None) -> list[RelationshipView]:
+        if entity is None:
             return []
         views = [
             RelationshipView(
                 id=str(rel.id),
                 type=rel.relationship_type.code,
-                target=rel.target_concept.name,
+                target=self._target_label(rel),
                 origin=rel.origin.value,
                 status=rel.status.value,
             )
-            for rel in reference.entity.relationships
+            for rel in entity.outgoing_relationships
         ]
         views.sort(key=lambda item: (item.type, item.target))
         return views
@@ -189,39 +218,113 @@ class DocumentService:
     def _confirmed_paperless_ids(self, paperless_ids: list[int]) -> set[int]:
         if not paperless_ids:
             return set()
+        external_ids = [self._paperless_external_id(item) for item in paperless_ids]
         rows = self._session.execute(
-            select(DocumentReference.paperless_document_id)
-            .join(Entity, Entity.id == DocumentReference.entity_id)
+            select(ExternalReference.external_id)
+            .join(Entity, Entity.id == ExternalReference.entity_id)
             .join(Relationship, Relationship.source_entity_id == Entity.id)
             .where(
-                DocumentReference.paperless_document_id.in_(paperless_ids),
+                ExternalReference.system == EXTERNAL_SYSTEM_PAPERLESS,
+                ExternalReference.external_id.in_(external_ids),
                 Relationship.status == RelationshipStatus.confirmed,
             )
             .distinct()
         )
         return {int(row[0]) for row in rows}
 
+    def _find_edge(
+        self,
+        source_entity_id: uuid.UUID,
+        relationship_type_id: uuid.UUID,
+        target_entity_id: uuid.UUID,
+    ) -> Relationship | None:
+        return self._session.scalar(
+            select(Relationship).where(
+                Relationship.source_entity_id == source_entity_id,
+                Relationship.relationship_type_id == relationship_type_id,
+                Relationship.target_entity_id == target_entity_id,
+            )
+        )
+
+    def _ensure_edge(
+        self,
+        *,
+        source_entity_id: uuid.UUID,
+        relationship_type_id: uuid.UUID,
+        target_entity_id: uuid.UUID,
+        origin: RelationshipOrigin,
+        status: RelationshipStatus,
+        created_by: str | None,
+        model: str | None,
+        prompt_version: str | None,
+        generated_at,
+        require_new: bool,
+    ) -> Relationship:
+        existing = self._find_edge(source_entity_id, relationship_type_id, target_entity_id)
+        if existing is not None:
+            if require_new:
+                raise ConflictError(
+                    "Relationship already exists for this document, type, and target"
+                )
+            return existing
+
+        relationship = Relationship(
+            source_entity_id=source_entity_id,
+            relationship_type_id=relationship_type_id,
+            target_entity_id=target_entity_id,
+            origin=origin,
+            status=status,
+            created_by=created_by,
+            model=model,
+            prompt_version=prompt_version,
+            generated_at=generated_at,
+        )
+        try:
+            with self._session.begin_nested():
+                self._session.add(relationship)
+                self._session.flush()
+                return relationship
+        except IntegrityError as exc:
+            if require_new:
+                raise ConflictError(
+                    "Relationship already exists for this document, type, and target"
+                ) from exc
+            existing = self._find_edge(source_entity_id, relationship_type_id, target_entity_id)
+            if existing is None:
+                raise
+            return existing
+
     def get_document(self, paperless_document_id: int, token: str | None = None) -> DocumentSemantics:
         auth = self._require_token(token)
         paperless_doc = self._ensure_paperless_access(paperless_document_id, auth)
         reference = self._session.scalars(
-            select(DocumentReference)
+            select(ExternalReference)
             .options(
-                joinedload(DocumentReference.entity).joinedload(Entity.relationships).joinedload(
-                    Relationship.relationship_type
-                ),
-                joinedload(DocumentReference.entity)
-                .joinedload(Entity.relationships)
-                .joinedload(Relationship.target_concept),
+                joinedload(ExternalReference.entity)
+                .joinedload(Entity.outgoing_relationships)
+                .joinedload(Relationship.relationship_type),
+                joinedload(ExternalReference.entity)
+                .joinedload(Entity.outgoing_relationships)
+                .joinedload(Relationship.target_entity)
+                .joinedload(Entity.concept),
+                joinedload(ExternalReference.entity)
+                .joinedload(Entity.outgoing_relationships)
+                .joinedload(Relationship.target_entity)
+                .joinedload(Entity.external_reference),
             )
-            .where(DocumentReference.paperless_document_id == paperless_document_id)
+            .where(
+                ExternalReference.system == EXTERNAL_SYSTEM_PAPERLESS,
+                ExternalReference.external_id
+                == self._paperless_external_id(paperless_document_id),
+            )
         ).unique().one_or_none()
+        entity = reference.entity if reference else None
         return DocumentSemantics(
             paperless_document_id=paperless_document_id,
-            entity_id=str(reference.entity_id) if reference else "",
+            entity_id=str(entity.id) if entity else "",
             title=paperless_doc.title,
             open_url=self._settings.paperless_document_url(paperless_document_id),
-            relationships=self._relationship_views(reference),
+            relationships=self._relationship_views(entity),
         )
 
     def list_unclassified(
@@ -271,7 +374,6 @@ class DocumentService:
                         break
 
                 if len(items) >= size:
-                    # More upstream content may still exist on this or later pages.
                     has_next = paperless_page.has_next or len(paperless_page.results) == size
                     break
 
@@ -309,45 +411,66 @@ class DocumentService:
         *,
         origin: RelationshipOrigin = RelationshipOrigin.manual,
         status: RelationshipStatus = RelationshipStatus.confirmed,
+        created_by: str | None = None,
+        model: str | None = None,
+        prompt_version: str | None = None,
+        generated_at=None,
     ) -> DocumentSemantics:
         auth = self._require_token(token)
         self._ensure_paperless_access(paperless_document_id, auth)
 
         relationship_type = self._session.scalar(
-            select(RelationshipType).where(RelationshipType.code == relationship_code)
+            select(RelationshipType)
+            .options(joinedload(RelationshipType.inverse_relationship_type))
+            .where(RelationshipType.code == relationship_code)
         )
         if relationship_type is None:
             raise ValidationError(f"Unknown relationship type '{relationship_code}'")
 
         concept = self._resolve_target_concept(relationship_type, target)
-        reference = self._get_or_create_document_reference(paperless_document_id)
+        source_entity = self._get_or_create_document_entity(paperless_document_id)
 
-        duplicate = self._session.scalar(
-            select(Relationship).where(
-                Relationship.source_entity_id == reference.entity_id,
-                Relationship.relationship_type_id == relationship_type.id,
-                Relationship.target_concept_id == concept.id,
-            )
-        )
-        if duplicate is not None:
-            raise ConflictError(
-                "Relationship already exists for this document, type, and target"
-            )
-
-        relationship = Relationship(
-            source_entity_id=reference.entity_id,
+        self._ensure_edge(
+            source_entity_id=source_entity.id,
             relationship_type_id=relationship_type.id,
-            target_concept_id=concept.id,
+            target_entity_id=concept.id,
             origin=origin,
             status=status,
+            created_by=created_by,
+            model=model,
+            prompt_version=prompt_version,
+            generated_at=generated_at,
+            require_new=True,
         )
-        self._session.add(relationship)
-        try:
-            self._session.flush()
-        except IntegrityError as exc:
-            raise ConflictError(
-                "Relationship already exists for this document, type, and target"
-            ) from exc
+
+        if relationship_type.directionality == RelationshipDirectionality.symmetric:
+            self._ensure_edge(
+                source_entity_id=concept.id,
+                relationship_type_id=relationship_type.id,
+                target_entity_id=source_entity.id,
+                origin=origin,
+                status=status,
+                created_by=created_by,
+                model=model,
+                prompt_version=prompt_version,
+                generated_at=generated_at,
+                require_new=False,
+            )
+
+        inverse = relationship_type.inverse_relationship_type
+        if inverse is not None:
+            self._ensure_edge(
+                source_entity_id=concept.id,
+                relationship_type_id=inverse.id,
+                target_entity_id=source_entity.id,
+                origin=origin,
+                status=status,
+                created_by=created_by,
+                model=model,
+                prompt_version=prompt_version,
+                generated_at=generated_at,
+                require_new=False,
+            )
 
         return self.get_document(paperless_document_id, token=auth)
 
@@ -361,27 +484,60 @@ class DocumentService:
         relationship = self._session.scalars(
             select(Relationship)
             .options(
-                joinedload(Relationship.source_entity).joinedload(Entity.document_reference),
+                joinedload(Relationship.source_entity).joinedload(Entity.external_reference),
+                joinedload(Relationship.relationship_type).joinedload(
+                    RelationshipType.inverse_relationship_type
+                ),
             )
             .where(Relationship.id == rel_uuid)
         ).unique().one_or_none()
-        if relationship is None or relationship.source_entity.document_reference is None:
+        if relationship is None or relationship.source_entity.external_reference is None:
             raise NotFoundError("Relationship not found")
 
-        paperless_id = relationship.source_entity.document_reference.paperless_document_id
+        external = relationship.source_entity.external_reference
+        if external.system != EXTERNAL_SYSTEM_PAPERLESS:
+            raise NotFoundError("Relationship not found")
+        paperless_id = int(external.external_id)
         self._ensure_paperless_access(paperless_id, auth)
+
+        source_id = relationship.source_entity_id
+        target_id = relationship.target_entity_id
+        rel_type = relationship.relationship_type
+
         self._session.delete(relationship)
         self._session.flush()
 
+        if rel_type.directionality == RelationshipDirectionality.symmetric:
+            companion = self._find_edge(target_id, rel_type.id, source_id)
+            if companion is not None:
+                self._session.delete(companion)
+                self._session.flush()
+
+        inverse = rel_type.inverse_relationship_type
+        if inverse is not None:
+            companion = self._find_edge(target_id, inverse.id, source_id)
+            if companion is not None:
+                self._session.delete(companion)
+                self._session.flush()
+
     def list_relationship_types(self) -> list[RelationshipTypeView]:
         rows = self._session.scalars(
-            select(RelationshipType).options(joinedload(RelationshipType.target_ontology))
+            select(RelationshipType).options(
+                joinedload(RelationshipType.target_ontology),
+                joinedload(RelationshipType.inverse_relationship_type),
+            )
         ).unique()
         views = [
             RelationshipTypeView(
                 code=item.code,
                 name=item.name,
                 target_ontology=item.target_ontology.code if item.target_ontology else None,
+                directionality=item.directionality.value,
+                inverse=(
+                    item.inverse_relationship_type.code
+                    if item.inverse_relationship_type
+                    else None
+                ),
             )
             for item in rows
         ]
