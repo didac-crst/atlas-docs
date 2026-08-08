@@ -1,8 +1,9 @@
-"""Idempotent seed loader for AtlasDocs v0.1 ontologies and relationship types."""
+"""Idempotent seed loader for AtlasDocs ontologies and relationship types."""
 
 from __future__ import annotations
 
 import argparse
+import uuid
 from pathlib import Path
 
 import yaml
@@ -10,7 +11,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from atlasdocs.config import get_settings
-from atlasdocs.db.models import Concept, Ontology, RelationshipType
+from atlasdocs.db.models import (
+    Concept,
+    Entity,
+    EntityType,
+    Ontology,
+    RelationshipDirectionality,
+    RelationshipType,
+)
 from atlasdocs.db.session import get_engine, get_session_factory
 
 
@@ -20,6 +28,12 @@ def load_seed_file(path: Path) -> dict:
     if not isinstance(data, dict):
         raise ValueError(f"Seed file must be a mapping: {path}")
     return data
+
+
+def _directionality(value: str | None) -> RelationshipDirectionality:
+    if value is None:
+        return RelationshipDirectionality.directed
+    return RelationshipDirectionality(value)
 
 
 def apply_seed(session: Session, data: dict) -> None:
@@ -43,8 +57,12 @@ def apply_seed(session: Session, data: dict) -> None:
                 )
             )
             if concept is None:
+                entity = Entity(id=uuid.uuid4(), entity_type=EntityType.concept)
+                session.add(entity)
+                session.flush()
                 session.add(
                     Concept(
+                        id=entity.id,
                         ontology_id=ontology.id,
                         code=concept_item["code"],
                         name=concept_item["name"],
@@ -55,6 +73,7 @@ def apply_seed(session: Session, data: dict) -> None:
 
     session.flush()
 
+    rel_types: dict[str, RelationshipType] = {}
     for item in data.get("relationship_types", []):
         target_code = item.get("target_ontology")
         target_ontology_id = None
@@ -69,17 +88,36 @@ def apply_seed(session: Session, data: dict) -> None:
         rel_type = session.scalar(
             select(RelationshipType).where(RelationshipType.code == item["code"])
         )
+        directionality = _directionality(item.get("directionality"))
         if rel_type is None:
-            session.add(
-                RelationshipType(
-                    code=item["code"],
-                    name=item["name"],
-                    target_ontology_id=target_ontology_id,
-                )
+            rel_type = RelationshipType(
+                code=item["code"],
+                name=item["name"],
+                target_ontology_id=target_ontology_id,
+                directionality=directionality,
             )
+            session.add(rel_type)
+            session.flush()
         else:
             rel_type.name = item["name"]
             rel_type.target_ontology_id = target_ontology_id
+            rel_type.directionality = directionality
+        rel_types[rel_type.code] = rel_type
+
+    session.flush()
+
+    for item in data.get("relationship_types", []):
+        inverse_code = item.get("inverse")
+        rel_type = rel_types[item["code"]]
+        if not inverse_code:
+            rel_type.inverse_relationship_type_id = None
+            continue
+        inverse = rel_types.get(inverse_code) or session.scalar(
+            select(RelationshipType).where(RelationshipType.code == inverse_code)
+        )
+        if inverse is None:
+            raise ValueError(f"Unknown inverse relationship type '{inverse_code}'")
+        rel_type.inverse_relationship_type_id = inverse.id
 
 
 def seed_from_path(session: Session, path: Path) -> None:

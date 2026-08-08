@@ -12,11 +12,15 @@ This repository is the public product. It must be deployable independently of Sa
 
 ## Status
 
+v0.3 generalizes persistence to Entity + ExternalReference (concepts as
+entities, entity-to-entity relationships) while keeping the
+`/documents/{paperless_id}` API as a compatibility facade. See
+`docs/architecture-assessment.md`, `docs/v0.3-roadmap.md`, and
+`docs/v0.3-migration-plan.md`.
+
 v0.2 adds a small server-rendered classification workbench on the v0.1 API: needs-classification queue, document detail, and relationship create/delete.
 
-See `docs/ROADMAP.md`, `docs/v0.2-ui-design-proposal.md`, and the post-v0.2
-architecture notes in `docs/architecture-assessment.md` and `docs/v0.3-roadmap.md`
-(planning only until approved).
+See also `docs/ROADMAP.md` and `docs/v0.2-ui-design-proposal.md`.
 
 ## Quick start (development)
 

@@ -80,6 +80,7 @@ _DOMAIN_ERRORS = (
 def _serialize(document) -> DocumentResponse:
     return DocumentResponse(
         paperless_document_id=document.paperless_document_id,
+        entity_id=document.entity_id or None,
         title=document.title,
         open_url=document.open_url,
         relationships=[
@@ -188,6 +189,8 @@ def list_relationship_types(
             code=item.code,
             name=item.name,
             target_ontology=item.target_ontology,
+            directionality=item.directionality,
+            inverse=item.inverse,
         )
         for item in service.list_relationship_types()
     ]

@@ -16,6 +16,7 @@ class RelationshipResponse(BaseModel):
 
 class DocumentResponse(BaseModel):
     paperless_document_id: int
+    entity_id: str | None = None
     title: str | None = None
     open_url: str | None = None
     relationships: list[RelationshipResponse]
@@ -40,6 +41,8 @@ class RelationshipTypeResponse(BaseModel):
     code: str
     name: str
     target_ontology: str | None = None
+    directionality: str = "directed"
+    inverse: str | None = None
 
 
 class ConceptResponse(BaseModel):

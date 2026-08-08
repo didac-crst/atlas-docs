@@ -2,9 +2,11 @@
 
 ## Status
 
-Assessment only. No schema, API, or UI changes are authorized by this document.
-Implementation, tests, and a concrete migration plan wait for approval of this
-assessment and of `docs/v0.3-roadmap.md`.
+Assessment of `main` after v0.2 (PR #2). The gaps below drove
+`docs/v0.3-roadmap.md` and `docs/v0.3-migration-plan.md`. v0.3 implementation
+addresses the identity/relationship gaps listed here; Evidence, native notes,
+sidecars, LLMs, MCP, embeddings, graph UI, migration tooling, and Supernova
+remain deferred.
 
 Compared against:
 
