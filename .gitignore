@@ -13,3 +13,11 @@ build/
 .coverage
 htmlcov/
 _tmp/
+node_modules/
+frontend/dist/
+frontend/node_modules/
+src/atlasdocs/ui/spa/
+!src/atlasdocs/ui/spa/.gitkeep
+playwright-report/
+test-results/
+blob-report/

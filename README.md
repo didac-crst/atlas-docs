@@ -13,11 +13,12 @@ This repository is the public product. It must be deployable independently of Sa
 ## Status
 
 v0.4 adds a general entity relationship API, Paperless reconciliation
-(`atlasdocs reconcile` / `/ui/reconcile`), and richer classification workbench
-metadata on the v0.3 Entity + ExternalReference core.
+(`atlasdocs reconcile` / `/ui/reconcile`), and a React classification workbench
+on the v0.3 Entity + ExternalReference core.
 
-See `docs/v0.4-semantic-workbench.md`, `docs/reconciliation.md`,
-`docs/architecture-assessment.md`, and `docs/v0.3-roadmap.md`.
+See `docs/v0.4-semantic-workbench.md`, `docs/frontend-architecture.md`,
+`docs/reconciliation.md`, `docs/architecture-assessment.md`, and
+`docs/v0.3-roadmap.md`.
 
 ## Quick start (development)
 
@@ -26,8 +27,15 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 
-# API/UI tests use SQLite and a mocked Paperless client
+# API/BFF tests use SQLite and a mocked Paperless client
 pytest
+
+# Frontend unit tests + SPA build (copies into src/atlasdocs/ui/spa)
+cd frontend && npm install && npm test && npm run build && cd ..
+
+# Playwright smoke (desktop + mobile) against mocked Paperless
+npm install && npx playwright install chromium
+npm run test:e2e
 
 # Full stack with PostgreSQL
 docker compose up --build
@@ -49,11 +57,13 @@ curl 'http://localhost:8080/documents?unclassified=true&page=1&page_size=25' \
 
 ## Layout
 
-- `src/atlasdocs/` — FastAPI service, domain model, Paperless REST client, Jinja UI
+- `src/atlasdocs/` — FastAPI service, domain model, Paperless REST client, UI BFF + SPA assets
+- `frontend/` — React + TypeScript + Vite workbench
+- `e2e/` — Playwright smoke tests
 - `config/seed/` — version-controlled ontology seed data
 - `alembic/` — reproducible PostgreSQL migrations
 - `docs/` — product architecture and roadmap
-- `.github/workflows/ci.yml` — tests (including Postgres migration), container build, and gated GHCR publish
+- `.github/workflows/ci.yml` — pytest, frontend, Playwright, container build, gated GHCR publish
 - `migration/`, `semantic/` — reserved future boundaries
 
 ## Configuration
@@ -83,7 +93,7 @@ The UI keeps Paperless tokens in a server-side session. The browser only receive
 
 Unclassified listing fetches one Paperless page (`page_size` default/max 25) and filters with a single AtlasDocs query for confirmed relationships.
 
-Duplicate relationships for the same document, type, and target are rejected with HTTP 409. Browser mutations use CSRF-protected POST forms.
+Duplicate relationships for the same document, type, and target are rejected with HTTP 409. Browser mutations use CSRF-protected BFF calls (`X-CSRF-Token`).
 
 The private Satellite deployment lives separately in `satlas-docs` and consumes AtlasDocs through a pinned release or container image.
 

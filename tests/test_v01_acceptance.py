@@ -411,24 +411,26 @@ def test_get_document_with_multiple_relationships(client: TestClient) -> None:
 
 
 def test_ui_requires_session_and_hides_token(client: TestClient) -> None:
-    assert client.get("/ui", follow_redirects=False).status_code == 303
-    connect = client.get("/ui/connect")
-    assert connect.status_code == 200
-    assert "paperless_token" in connect.text
-    assert "test-token" not in connect.text
-    assert "Token " not in connect.text or "Paperless token" in connect.text
+    spa = client.get("/ui/")
+    assert spa.status_code in {200, 503}
+    session = client.get("/ui/api/session")
+    assert session.status_code == 200
+    body = session.json()
+    assert body["authenticated"] is False
+    assert body["csrf_token"]
+    assert "Token " not in session.text
+    assert "paperless" not in body
 
 
 def test_session_cookie_is_opaque_and_excludes_paperless_token(client: TestClient) -> None:
-    connect_page = client.get("/ui/connect")
-    csrf = connect_page.text.split('name="csrf_token" value="')[1].split('"')[0]
+    session = client.get("/ui/api/session").json()
     secret = "super-secret-paperless-token-value"
     connected = client.post(
-        "/ui/connect",
-        data={"csrf_token": csrf, "paperless_token": secret},
-        follow_redirects=False,
+        "/ui/api/connect",
+        json={"csrf_token": session["csrf_token"], "paperless_token": secret},
     )
-    assert connected.status_code == 303
+    assert connected.status_code == 200
+    assert connected.json()["authenticated"] is True
 
     set_cookie = connected.headers.get("set-cookie", "")
     assert "atlasdocs_sid=" in set_cookie
@@ -437,6 +439,7 @@ def test_session_cookie_is_opaque_and_excludes_paperless_token(client: TestClien
     assert secret not in set_cookie
     assert "Token " not in set_cookie
     assert f"Token {secret}" not in set_cookie
+    assert secret not in connected.text
 
     cookie_value = client.cookies.get("atlasdocs_sid")
     assert cookie_value
@@ -449,55 +452,46 @@ def test_session_cookie_is_opaque_and_excludes_paperless_token(client: TestClien
 
 
 def test_ui_logout_invalidates_server_session(client: TestClient) -> None:
-    connect_page = client.get("/ui/connect")
-    csrf = connect_page.text.split('name="csrf_token" value="')[1].split('"')[0]
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
     client.post(
-        "/ui/connect",
-        data={"csrf_token": csrf, "paperless_token": "test-token"},
-        follow_redirects=False,
+        "/ui/api/connect",
+        json={"csrf_token": csrf, "paperless_token": "test-token"},
     )
     sid = client.cookies.get("atlasdocs_sid")
     assert session_store.get(sid) is not None
 
-    workbench = client.get("/ui")
-    csrf = workbench.text.split('name="csrf_token" value="')[1].split('"')[0]
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
     disconnected = client.post(
-        "/ui/disconnect",
-        data={"csrf_token": csrf},
-        follow_redirects=False,
+        "/ui/api/disconnect",
+        json={"csrf_token": csrf},
+        headers={"X-CSRF-Token": csrf},
     )
-    assert disconnected.status_code == 303
+    assert disconnected.status_code == 200
+    assert disconnected.json()["authenticated"] is False
     assert session_store.get(sid) is None
-    assert client.get("/ui", follow_redirects=False).status_code == 303
+    assert client.get("/ui/api/documents").status_code == 401
 
 
-def test_ui_classify_via_post_form(client: TestClient) -> None:
-    connect_page = client.get("/ui/connect")
-    csrf = connect_page.text.split('name="csrf_token" value="')[1].split('"')[0]
+def test_ui_classify_via_bff(client: TestClient) -> None:
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
     connected = client.post(
-        "/ui/connect",
-        data={"csrf_token": csrf, "paperless_token": "test-token"},
-        follow_redirects=False,
+        "/ui/api/connect",
+        json={"csrf_token": csrf, "paperless_token": "test-token"},
     )
-    assert connected.status_code == 303
+    assert connected.status_code == 200
+    csrf = connected.json()["csrf_token"]
 
-    detail = client.get("/ui/documents/184")
+    detail = client.get("/ui/api/documents/184")
     assert detail.status_code == 200
-    assert "Payslip Germany" in detail.text
+    assert detail.json()["title"] == "Payslip Germany"
     assert "test-token" not in detail.text
-    csrf = detail.text.split('name="csrf_token" value="')[1].split('"')[0]
 
     classified = client.post(
-        "/ui/documents/184/relationships",
-        data={
-            "csrf_token": csrf,
-            "relationship": "source-country",
-            "target": "Germany",
-            "page": "1",
-        },
-        follow_redirects=True,
+        "/ui/api/documents/184/relationships",
+        headers={"X-CSRF-Token": csrf},
+        json={"relationship": "source-country", "target": "Germany"},
     )
-    assert classified.status_code == 200
-    assert "source-country" in classified.text
-    assert "Germany" in classified.text
+    assert classified.status_code == 201
+    body = classified.json()
+    assert any(item["type"] == "source-country" and item["target"] == "Germany" for item in body["relationships"])
     assert "test-token" not in classified.text

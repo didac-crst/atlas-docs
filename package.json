@@ -1,0 +1,12 @@
+{
+  "name": "atlasdocs-e2e",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "1.52.0",
+    "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium"
+  }
+}

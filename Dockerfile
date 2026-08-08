@@ -1,3 +1,10 @@
+FROM node:22-bookworm-slim AS frontend
+WORKDIR /build
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
 FROM python:3.13-slim
 
 WORKDIR /app
@@ -13,6 +20,7 @@ COPY src ./src
 COPY config ./config
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY --from=frontend /build/dist /app/src/atlasdocs/ui/spa
 
 RUN pip install --no-cache-dir .
 

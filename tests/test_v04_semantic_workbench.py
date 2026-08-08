@@ -185,40 +185,47 @@ def test_reconcile_service_pagination(
     assert limited.json()["paperless_documents_seen"] == 3
 
 
-def test_ui_shows_paperless_metadata_and_reconcile(client: TestClient) -> None:
-    connect = client.get("/ui/connect")
-    csrf = connect.text.split('name="csrf_token" value="')[1].split('"')[0]
-    client.post(
-        "/ui/connect",
-        data={"csrf_token": csrf, "paperless_token": "test-token"},
-        follow_redirects=False,
+def test_ui_bff_metadata_and_reconcile(client: TestClient) -> None:
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
+    connected = client.post(
+        "/ui/api/connect",
+        json={"csrf_token": csrf, "paperless_token": "test-token"},
     )
-    detail = client.get("/ui/documents/184")
-    assert detail.status_code == 200
-    assert "Acme Payroll" in detail.text
-    assert "2024-01-15" in detail.text
-    assert "Payslip" in detail.text
+    assert connected.status_code == 200
+    csrf = connected.json()["csrf_token"]
 
-    reconcile = client.get("/ui/reconcile")
-    assert reconcile.status_code == 200
-    assert "never deleted" in reconcile.text.lower()
-    csrf = reconcile.text.split('name="csrf_token" value="')[1].split('"')[0]
+    detail = client.get("/ui/api/documents/184")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["correspondent"] == "Acme Payroll"
+    assert body["created_date"] == "2024-01-15"
+    assert body["document_type"] == "Payslip"
+    assert "test-token" not in detail.text
+
+    concepts = client.get("/ui/api/concepts?q=ger&ontology=country")
+    assert concepts.status_code == 200
+    assert any(item["code"] == "germany" for item in concepts.json())
+
     ran = client.post(
-        "/ui/reconcile",
-        data={"csrf_token": csrf, "dry_run": "1", "limit": "2"},
+        "/ui/api/reconcile",
+        headers={"X-CSRF-Token": csrf},
+        json={"dry_run": True, "limit": 2},
     )
     assert ran.status_code == 200
-    assert "Dry-run complete" in ran.text
+    assert ran.json()["dry_run"] is True
+    assert "not deleted" in ran.json()["human_summary"].lower()
 
 
 def test_ui_reconcile_csrf_required(client: TestClient) -> None:
-    connect = client.get("/ui/connect")
-    csrf = connect.text.split('name="csrf_token" value="')[1].split('"')[0]
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
     client.post(
-        "/ui/connect",
-        data={"csrf_token": csrf, "paperless_token": "test-token"},
-        follow_redirects=False,
+        "/ui/api/connect",
+        json={"csrf_token": csrf, "paperless_token": "test-token"},
     )
-    bad = client.post("/ui/reconcile", data={"csrf_token": "nope", "dry_run": "1"})
+    bad = client.post(
+        "/ui/api/reconcile",
+        headers={"X-CSRF-Token": "nope"},
+        json={"dry_run": True},
+    )
     assert bad.status_code == 400
     assert "Invalid CSRF token" in bad.text
