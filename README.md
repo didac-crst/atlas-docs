@@ -43,13 +43,24 @@ AtlasDocs keeps Paperless as the document system of record and adds a **semantic
 - **Workbench, not a second archive** — React UI under `/ui`; tokens stay server-side (HttpOnly + CSRF)
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif,system-ui,sans-serif","primaryColor":"#eaf8fb","primaryTextColor":"#102644","primaryBorderColor":"#08afc6","secondaryColor":"#102644","secondaryTextColor":"#eaf8fb","secondaryBorderColor":"#0d6cb6","tertiaryColor":"#f1f5f9","lineColor":"#3a4ccd","textColor":"#102644","mainBkg":"#f7f9fc","clusterBkg":"#ffffff","clusterBorder":"#a8eaf2","titleColor":"#102644","edgeLabelBackground":"#ffffff"}}}%%
 flowchart LR
-  You[You]
-  PL[Paperless]
-  AD[AtlasDocs]
-  You -->|"ingest_view_search"| PL
-  You -->|"classify_relate"| AD
-  AD -->|"REST_authorize"| PL
+  You((You))
+  subgraph paperless [Document_authority]
+    Store["Paperless-ngx<br/>OCR · search · ACLs · files"]
+  end
+  subgraph atlas [Semantic_layer]
+    Sem["AtlasDocs<br/>entities · relationships · provenance"]
+  end
+  You -->|"ingest / view / search"| Store
+  You -->|"classify / relate"| Sem
+  Sem -->|"REST + your token"| Store
+  classDef you fill:#3a4ccd,stroke:#102644,color:#ffffff
+  classDef pl fill:#102644,stroke:#0d6cb6,color:#eaf8fb
+  classDef ad fill:#08afc6,stroke:#0d6cb6,color:#102644
+  class You you
+  class Store pl
+  class Sem ad
 ```
 
 ## What’s in v0.4
