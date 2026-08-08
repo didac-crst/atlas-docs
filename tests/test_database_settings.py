@@ -24,7 +24,7 @@ def test_default_split_database_settings() -> None:
     assert settings.database_port == 5432
     assert settings.database_name == "atlasdocs"
     assert settings.database_user == "atlasdocs"
-    assert settings.database_password == "atlasdocs"
+    assert settings.database_password.get_secret_value() == "atlasdocs"
 
     url = settings.sqlalchemy_url()
     assert isinstance(url, URL)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import field_validator, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
@@ -10,6 +10,7 @@ from sqlalchemy.engine import URL
 UNCLASSIFIED_PAGE_SIZE = 25
 UNCLASSIFIED_MAX_UPSTREAM_PAGES = 5
 DEFAULT_SESSION_SECRET = "dev-only-change-me"
+DEFAULT_DATABASE_PASSWORD = "atlasdocs"
 MAX_UI_SESSIONS = 1000
 
 
@@ -20,14 +21,11 @@ class Settings(BaseSettings):
     database_port: int = 5432
     database_name: str = "atlasdocs"
     database_user: str = "atlasdocs"
-    database_password: str = "atlasdocs"
+    database_password: SecretStr = SecretStr(DEFAULT_DATABASE_PASSWORD)
 
     paperless_base_url: str = "http://localhost:8000"
     paperless_timeout_seconds: float = 10.0
     seed_path: str = "config/seed/v0.1.yaml"
-    # Not used for per-user document access. Browser UI uses a server-side session;
-    # JSON API requires an Authorization header on every document request.
-    paperless_token: str | None = None
 
     atlasdocs_env: str = "development"
     session_secret: str = DEFAULT_SESSION_SECRET
@@ -58,7 +56,7 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def _validate_production_session(self) -> Settings:
+    def _validate_production_secrets(self) -> Settings:
         if self.atlasdocs_env == "production":
             if not self.session_secret or self.session_secret == DEFAULT_SESSION_SECRET:
                 raise ValueError(
@@ -68,6 +66,12 @@ class Settings(BaseSettings):
             if not self.session_secure:
                 raise ValueError(
                     "SESSION_SECURE must be true when ATLASDOCS_ENV=production"
+                )
+            password = self.database_password.get_secret_value()
+            if not password or password == DEFAULT_DATABASE_PASSWORD:
+                raise ValueError(
+                    "DATABASE_PASSWORD must be a non-empty, non-default value when "
+                    "ATLASDOCS_ENV=production"
                 )
         return self
 
@@ -83,7 +87,7 @@ class Settings(BaseSettings):
         return URL.create(
             drivername="postgresql+psycopg",
             username=self.database_user,
-            password=self.database_password,
+            password=self.database_password.get_secret_value(),
             host=self.database_host,
             port=self.database_port,
             database=self.database_name,
