@@ -79,6 +79,7 @@ export type Concept = {
 export type CountStat = {
   count: number;
   capped: boolean;
+  unavailable?: boolean;
 };
 
 export type RecentDocument = {
@@ -106,9 +107,10 @@ export type HomeSummary = {
 export type EntitySearchType = "document" | "concept" | "any";
 
 export type EntitySearchHit = {
-  id: string;
+  id: string | null;
   label: string;
   entity_type: string;
+  paperless_document_id?: number | null;
   subtitle: string | null;
   open_url: string | null;
 };
@@ -434,5 +436,19 @@ export function relationshipTypesForTarget(
 }
 
 export function formatCountStat(stat: CountStat): string {
+  if (stat.unavailable) return "unavailable";
   return `${stat.count}${stat.capped ? "+" : ""}`;
+}
+
+export function relationshipTargetPayload(selected: EntitySearchHit): {
+  target_entity_id?: string;
+  target_paperless_id?: number;
+} {
+  if (selected.id) {
+    return { target_entity_id: selected.id };
+  }
+  if (selected.paperless_document_id != null) {
+    return { target_paperless_id: selected.paperless_document_id };
+  }
+  throw new Error("Selected target is missing an Atlas entity or Paperless document id");
 }

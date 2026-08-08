@@ -149,6 +149,8 @@ def cmd_worker_ingest(args: argparse.Namespace) -> int:
         try:
             worker = IngestionWorker(session, paperless)
             worked = worker.run_once()
+        except Exception:
+            worked = False
         finally:
             session.close()
         if not worked:

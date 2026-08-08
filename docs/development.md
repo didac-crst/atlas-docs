@@ -35,11 +35,16 @@ username/password (or use advanced token paste in development). Credentials
 stay server-side; the browser only keeps an opaque HttpOnly session cookie.
 Compose also starts `worker` for durable ingestion jobs.
 
-API-only reload during UI work:
+API-only reload during UI work. Run these commands in separate terminals:
 
 ```bash
+# Terminal 1
 uvicorn atlasdocs.main:app --reload --port 8080
+
+# Terminal 2
 atlasdocs worker ingest   # separate process for uploads
+
+# Terminal 3
 cd frontend && npm run dev   # proxies /ui/api to :8080
 ```
 

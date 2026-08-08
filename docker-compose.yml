@@ -36,6 +36,8 @@ services:
       TOKEN_ENCRYPTION_KEY: dev-only-token-encryption-key
       SESSION_SECURE: "false"
       SEED_PATH: /app/config/seed/v0.1.yaml
+    volumes:
+      - atlasdocs_ingest_spool:/tmp/atlasdocs-ingest
     depends_on:
       db:
         condition: service_healthy
@@ -56,9 +58,12 @@ services:
       SESSION_SECRET: dev-only-change-me
       TOKEN_ENCRYPTION_KEY: dev-only-token-encryption-key
       SESSION_SECURE: "false"
+    volumes:
+      - atlasdocs_ingest_spool:/tmp/atlasdocs-ingest
     depends_on:
       db:
         condition: service_healthy
 
 volumes:
   atlasdocs_pg:
+  atlasdocs_ingest_spool:

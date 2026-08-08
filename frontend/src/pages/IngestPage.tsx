@@ -61,13 +61,24 @@ export function IngestPage({ session, onSession }: Props) {
 
   useEffect(() => {
     if (!needsPoll) return;
+    let failures = 0;
     const handle = window.setInterval(() => {
-      void refreshJobs().catch(() => {
-        /* keep last known list while polling */
-      });
+      void refreshJobs()
+        .then(() => {
+          failures = 0;
+        })
+        .catch((err) => {
+          if (err instanceof ApiError && err.status === 401) {
+            window.clearInterval(handle);
+            navigate("/connect");
+            return;
+          }
+          failures += 1;
+          if (failures >= 5) window.clearInterval(handle);
+        });
     }, POLL_MS);
     return () => window.clearInterval(handle);
-  }, [needsPoll, refreshJobs]);
+  }, [navigate, needsPoll, refreshJobs]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();

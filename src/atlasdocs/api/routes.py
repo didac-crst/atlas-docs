@@ -272,7 +272,7 @@ def bulk_document_relationships(
 
 
 @router.post("/ingest", response_model=IngestionJobResponse, status_code=status.HTTP_202_ACCEPTED)
-async def ingest_document(
+def ingest_document(
     document: UploadFile = File(...),
     authorization: str = Depends(require_authorization),
     service: IngestionService = Depends(get_ingest_service),

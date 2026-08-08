@@ -4,6 +4,7 @@ import {
   filterConcepts,
   formatCountStat,
   jobNeedsPolling,
+  relationshipTargetPayload,
   relationshipTypesForTarget,
   summarizeBulkResults,
 } from "../api/client";
@@ -108,5 +109,37 @@ describe("formatCountStat", () => {
   it("appends + when capped", () => {
     expect(formatCountStat({ count: 25, capped: true })).toBe("25+");
     expect(formatCountStat({ count: 3, capped: false })).toBe("3");
+  });
+
+  it("marks unavailable stats", () => {
+    expect(formatCountStat({ count: 0, capped: false, unavailable: true })).toBe("unavailable");
+  });
+});
+
+describe("relationshipTargetPayload", () => {
+  it("prefers entity id when present", () => {
+    expect(
+      relationshipTargetPayload({
+        id: "ent-1",
+        label: "Germany",
+        entity_type: "concept",
+        paperless_document_id: null,
+        subtitle: null,
+        open_url: null,
+      }),
+    ).toEqual({ target_entity_id: "ent-1" });
+  });
+
+  it("falls back to paperless document id", () => {
+    expect(
+      relationshipTargetPayload({
+        id: null,
+        label: "Payslip",
+        entity_type: "document",
+        paperless_document_id: 184,
+        subtitle: null,
+        open_url: null,
+      }),
+    ).toEqual({ target_paperless_id: 184 });
   });
 });

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Waypoints } from "lucide-react";
 import {
   bulkAddRelationships,
+  relationshipTargetPayload,
   relationshipTypesForTarget,
   searchEntities,
   summarizeBulkResults,
@@ -453,7 +454,7 @@ function BulkAssignForm({ selectedIds, types, csrfToken, onDone, onError }: Bulk
         {
           paperless_document_ids: selectedIds,
           relationship,
-          target_entity_id: selectedEntity.id,
+          ...relationshipTargetPayload(selectedEntity),
           csrf_token: csrfToken,
         },
         csrfToken,

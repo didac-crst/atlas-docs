@@ -107,6 +107,7 @@ class IngestionJobsResponse(BaseModel):
 class CountStatResponse(BaseModel):
     count: int
     capped: bool = False
+    unavailable: bool = False
 
 
 class RecentDocumentResponse(BaseModel):
@@ -132,9 +133,10 @@ class HomeSummaryResponse(BaseModel):
 
 
 class EntitySearchHitResponse(BaseModel):
-    id: str
+    id: str | None = None
     label: str
     entity_type: str
+    paperless_document_id: int | None = None
     subtitle: str | None = None
     open_url: str | None = None
 

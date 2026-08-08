@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from tests.conftest import AUTH
+from tests.fakes import FakePaperlessTransport
 
 
 def _connect(client: TestClient) -> str:
@@ -45,7 +46,7 @@ def test_entity_search_concepts(client: TestClient) -> None:
     assert hits
     assert all(item["entity_type"] == "concept" for item in hits)
     assert all("id" in item and "label" in item for item in hits)
-    assert all("paperless" not in item for item in hits)
+    assert all(item.get("paperless_document_id") is None for item in hits)
 
 
 def test_entity_search_documents(client: TestClient) -> None:
@@ -57,6 +58,7 @@ def test_entity_search_documents(client: TestClient) -> None:
     hits = response.json()
     assert hits
     assert all(item["entity_type"] == "document" for item in hits)
+    assert all(item.get("paperless_document_id") is not None for item in hits)
     assert all(item.get("open_url") is None or "paperless.example.test" in item["open_url"] for item in hits)
 
 
@@ -75,6 +77,22 @@ def test_documents_filter_by_correspondent(client: TestClient) -> None:
     items = response.json()["items"]
     assert items
     assert all("Acme" in (item.get("correspondent") or "") for item in items)
+
+
+def test_unclassified_oldest_uses_ascending_order(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    paperless_transport.calls.clear()
+    response = client.get(
+        "/documents",
+        headers=AUTH,
+        params={"classification": "unclassified", "sort": "created", "order": "asc"},
+    )
+    assert response.status_code == 200
+    list_calls = [call for call in paperless_transport.calls if "GET /api/documents/" in call]
+    assert list_calls
+    assert any("ordering=created" in call for call in list_calls)
+    assert all("ordering=-created" not in call for call in list_calls)
 
 
 def test_relationship_via_target_entity_id(client: TestClient) -> None:

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useId, useMemo, useState } from "react";
 import { Waypoints } from "lucide-react";
 import {
   addRelationship,
+  relationshipTargetPayload,
   relationshipTypesForTarget,
   searchEntities,
   type DocumentDetail,
@@ -105,7 +106,7 @@ export function RelationshipComposer({
     try {
       const document = await addRelationship(
         documentId,
-        { relationship, target_entity_id: selected.id },
+        { relationship, ...relationshipTargetPayload(selected) },
         csrfToken,
       );
       resetTarget();

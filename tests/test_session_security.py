@@ -144,7 +144,12 @@ def test_session_store_evicts_when_capped(
 
 
 @pytest.mark.parametrize("value", [0, -1])
-def test_session_store_rejects_non_positive_capacity(tmp_path, value: int) -> None:
+def test_session_store_rejects_non_positive_capacity(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, value: int
+) -> None:
+    monkeypatch.setenv("ATLASDOCS_ENV", "development")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-key")
+    get_settings.cache_clear()
     reset_engine()
     engine = get_engine(f"sqlite+pysqlite:///{tmp_path / 'sess.db'}")
     Base.metadata.create_all(engine)
@@ -175,6 +180,30 @@ def test_session_save_does_not_resurrect_deleted_session(
         store.delete(session.id)
         assert store.rotate_csrf(session) is False
         assert store.get(session.id) is None
+    finally:
+        db.close()
+        reset_engine()
+
+
+def test_undecryptable_session_is_dropped(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SESSION_MAX_AGE_SECONDS", "3600")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "original-key")
+    monkeypatch.setenv("ATLASDOCS_ENV", "development")
+    get_settings.cache_clear()
+    reset_engine()
+    engine = get_engine(f"sqlite+pysqlite:///{tmp_path / 'sess.db'}")
+    Base.metadata.create_all(engine)
+    db = get_session_factory()()
+    try:
+        store = DbSessionStore(db, max_sessions=10)
+        session = store.create(paperless_authorization="Token secret")
+        session_id = session.id
+        monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "rotated-key")
+        get_settings.cache_clear()
+        assert store.get(session_id) is None
+        assert store.get(session_id) is None
     finally:
         db.close()
         reset_engine()

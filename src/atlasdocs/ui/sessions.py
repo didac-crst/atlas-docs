@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Request, Response
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from atlasdocs.config import MAX_UI_SESSIONS, get_settings
@@ -54,11 +54,7 @@ class DbSessionStore:
         return get_settings().token_encryption_key
 
     def _purge_expired(self) -> None:
-        now = utcnow()
-        rows = list(self._db.scalars(select(UiSessionRow)).all())
-        for row in rows:
-            if _as_aware(row.expires_at) <= now:
-                self._db.delete(row)
+        self._db.execute(delete(UiSessionRow).where(UiSessionRow.expires_at <= utcnow()))
         self._db.flush()
 
     def _enforce_cap(self, *, max_sessions: int | None = None) -> None:
@@ -67,13 +63,20 @@ class DbSessionStore:
         )
         if cap < 1:
             raise ValueError("max_sessions must be >= 1")
-        rows = list(
-            self._db.scalars(select(UiSessionRow).order_by(UiSessionRow.expires_at.asc())).all()
+        count = int(self._db.scalar(select(func.count()).select_from(UiSessionRow)) or 0)
+        overflow = count - cap + 1
+        if overflow <= 0:
+            return
+        ids = list(
+            self._db.scalars(
+                select(UiSessionRow.id)
+                .order_by(UiSessionRow.expires_at.asc())
+                .limit(overflow)
+            )
         )
-        while len(rows) >= cap:
-            oldest = rows.pop(0)
-            self._db.delete(oldest)
-        self._db.flush()
+        if ids:
+            self._db.execute(delete(UiSessionRow).where(UiSessionRow.id.in_(ids)))
+            self._db.flush()
 
     def _to_view(self, row: UiSessionRow) -> UiSession:
         auth: str | None = None
@@ -129,7 +132,13 @@ class DbSessionStore:
             self._db.delete(row)
             self._db.flush()
             return None
-        return self._to_view(row)
+        try:
+            return self._to_view(row)
+        except ValueError:
+            # Key rotation / corrupt ciphertext: drop the row so login can recover.
+            self._db.delete(row)
+            self._db.flush()
+            return None
 
     def save(self, session: UiSession) -> bool:
         row = self._db.get(UiSessionRow, session.id)

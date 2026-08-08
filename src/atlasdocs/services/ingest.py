@@ -47,7 +47,11 @@ class IngestionJobView:
 
 def spool_dir() -> Path:
     root = Path(tempfile.gettempdir()) / "atlasdocs-ingest"
-    root.mkdir(parents=True, exist_ok=True)
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        os.chmod(root, 0o700)
+    except OSError:
+        pass
     return root
 
 
@@ -220,17 +224,38 @@ class IngestionWorker:
         job = self._claim_job()
         if job is None:
             return False
+        job_id = job.id
+        # Persist the lease before any Paperless I/O so a crash mid-call cannot
+        # leave the job unlocked for a second worker while upload is in flight.
+        self._session.commit()
         try:
+            job = self._session.get(IngestionJob, job_id)
+            if job is None:
+                return True
             self._process(job)
             self._session.commit()
         except Exception:
             self._session.rollback()
+            try:
+                job = self._session.get(IngestionJob, job_id)
+                if job is not None and job.state in {
+                    IngestionJobState.uploading,
+                    IngestionJobState.processing,
+                }:
+                    self._fail(job, "worker_error", "Unhandled worker error")
+                    self._session.commit()
+            except Exception:
+                self._session.rollback()
             raise
         return True
 
     def run_forever(self, *, idle_sleep: float = 1.0) -> None:
         while True:
-            worked = self.run_once()
+            try:
+                worked = self.run_once()
+            except Exception:
+                # Keep the worker alive; the failed job is terminal or reclaimed by lease.
+                worked = False
             if not worked:
                 time.sleep(idle_sleep)
 

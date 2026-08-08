@@ -221,9 +221,8 @@ def _json_with_session(payload: dict | BaseModel, ui_session, status_code: int =
 
 
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip() or "unknown"
+    # Do not trust X-Forwarded-For from the client; rate limits must use the
+    # direct peer address unless a trusted reverse proxy strips/rewrites it.
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
@@ -345,16 +344,22 @@ def get_home_summary(
         needs_classification=CountStatResponse(
             count=summary.needs_classification.count,
             capped=summary.needs_classification.capped,
+            unavailable=summary.needs_classification.unavailable,
         ),
         needs_review=CountStatResponse(
-            count=summary.needs_review.count, capped=summary.needs_review.capped
+            count=summary.needs_review.count,
+            capped=summary.needs_review.capped,
+            unavailable=summary.needs_review.unavailable,
         ),
         failed_ingestion=CountStatResponse(
-            count=summary.failed_ingestion.count, capped=summary.failed_ingestion.capped
+            count=summary.failed_ingestion.count,
+            capped=summary.failed_ingestion.capped,
+            unavailable=summary.failed_ingestion.unavailable,
         ),
         reconciliation_issues=CountStatResponse(
             count=summary.reconciliation_issues.count,
             capped=summary.reconciliation_issues.capped,
+            unavailable=summary.reconciliation_issues.unavailable,
         ),
         recent_documents=[
             RecentDocumentResponse(
@@ -398,6 +403,7 @@ def search_entities(
             id=item.id,
             label=item.label,
             entity_type=item.entity_type,
+            paperless_document_id=item.paperless_document_id,
             subtitle=item.subtitle,
             open_url=item.open_url,
         )
@@ -644,7 +650,7 @@ def search_concepts(
 
 
 @api_router.post("/ingest", response_model=IngestionJobResponse, status_code=status.HTTP_202_ACCEPTED)
-async def ingest_upload(
+def ingest_upload(
     request: Request,
     document: UploadFile = File(...),
     x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),

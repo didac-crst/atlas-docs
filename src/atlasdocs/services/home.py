@@ -17,14 +17,27 @@ from atlasdocs.db.models import (
     RelationshipStatus,
 )
 from atlasdocs.security.tokens import token_fingerprint
-from atlasdocs.services.documents import DocumentService, UnauthorizedError
-from atlasdocs.services.paperless import PaperlessAuthError, PaperlessClient, PaperlessError
+from atlasdocs.services.documents import (
+    DocumentService,
+    ForbiddenDocumentError,
+    NotFoundError,
+    UnauthorizedError,
+    UpstreamError,
+)
+from atlasdocs.services.paperless import (
+    PaperlessAuthError,
+    PaperlessClient,
+    PaperlessDocument,
+    PaperlessError,
+    PaperlessUnavailableError,
+)
 
 
 @dataclass(frozen=True)
 class CountStat:
     count: int
     capped: bool = False
+    unavailable: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,6 +70,7 @@ class HomeService:
         self._session = session
         self._paperless = paperless
         self._documents = DocumentService(session, paperless)
+        self._access_cache: dict[int, PaperlessDocument | None] = {}
 
     def summarize(self, authorization: str) -> HomeSummary:
         if not authorization:
@@ -79,13 +93,30 @@ class HomeService:
             recent_knowledge=recent_knowledge,
         )
 
+    def _accessible_document(self, doc_id: int, authorization: str) -> PaperlessDocument | None:
+        if doc_id in self._access_cache:
+            return self._access_cache[doc_id]
+        try:
+            doc = self._documents._ensure_paperless_access(doc_id, authorization)  # noqa: SLF001
+        except (ForbiddenDocumentError, NotFoundError):
+            self._access_cache[doc_id] = None
+            return None
+        except (UpstreamError, PaperlessUnavailableError, PaperlessError):
+            raise
+        self._access_cache[doc_id] = doc
+        return doc
+
     def _count_unclassified(self, authorization: str) -> CountStat:
         try:
             page = self._documents.list_documents(
                 authorization, page=1, page_size=25, classification="unclassified"
             )
-        except (PaperlessAuthError, PaperlessError, UnauthorizedError):
+        except UnauthorizedError:
             return CountStat(count=0, capped=False)
+        except (PaperlessAuthError, ForbiddenDocumentError):
+            return CountStat(count=0, capped=False)
+        except (UpstreamError, PaperlessUnavailableError, PaperlessError):
+            return CountStat(count=0, capped=False, unavailable=True)
         count = len(page.items)
         capped = page.has_next
         return CountStat(count=count, capped=capped)
@@ -103,6 +134,7 @@ class HomeService:
 
     def _count_suggested(self, authorization: str) -> CountStat:
         """Count suggested relationships whose document source is accessible."""
+        # Bound the scan tightly: home only needs a small badge, not a full audit.
         rows = list(
             self._session.scalars(
                 select(Relationship)
@@ -111,31 +143,33 @@ class HomeService:
                 )
                 .where(Relationship.status == RelationshipStatus.suggested)
                 .order_by(Relationship.created_at.desc())
-                .limit(100)
+                .limit(25)
             ).unique()
         )
         accessible = 0
-        for rel in rows:
-            ref = rel.source_entity.external_reference if rel.source_entity else None
-            if ref is None or ref.system != EXTERNAL_SYSTEM_PAPERLESS:
-                continue
-            try:
-                doc_id = int(ref.external_id)
-            except ValueError:
-                continue
-            try:
-                self._documents._ensure_paperless_access(doc_id, authorization)  # noqa: SLF001
-            except Exception:  # noqa: BLE001 — denial is expected
-                continue
-            accessible += 1
-        return CountStat(count=accessible, capped=len(rows) >= 100)
+        try:
+            for rel in rows:
+                ref = rel.source_entity.external_reference if rel.source_entity else None
+                if ref is None or ref.system != EXTERNAL_SYSTEM_PAPERLESS:
+                    continue
+                try:
+                    doc_id = int(ref.external_id)
+                except ValueError:
+                    continue
+                if self._accessible_document(doc_id, authorization) is not None:
+                    accessible += 1
+        except (UpstreamError, PaperlessUnavailableError, PaperlessError):
+            return CountStat(count=0, capped=False, unavailable=True)
+        return CountStat(count=accessible, capped=len(rows) >= 25)
 
     def _count_missing_refs(self, authorization: str) -> CountStat:
         """Bounded: Paperless docs without AtlasDocs external references."""
         try:
             batch = self._paperless.list_documents(authorization, page=1, page_size=25)
-        except PaperlessError:
+        except PaperlessAuthError:
             return CountStat(count=0)
+        except PaperlessError:
+            return CountStat(count=0, unavailable=True)
         missing = 0
         for doc in batch.results:
             if self._documents.get_external_reference(doc.id) is None:
@@ -160,11 +194,8 @@ class HomeService:
         items: list[RecentDocumentItem] = []
         for job in jobs:
             assert job.paperless_document_id is not None
-            try:
-                doc = self._documents._ensure_paperless_access(  # noqa: SLF001
-                    job.paperless_document_id, authorization
-                )
-            except Exception:  # noqa: BLE001
+            doc = self._accessible_document(job.paperless_document_id, authorization)
+            if doc is None:
                 continue
             entity = None
             if job.entity_id:
@@ -202,9 +233,7 @@ class HomeService:
                 doc_id = int(ref.external_id)
             except ValueError:
                 continue
-            try:
-                self._documents._ensure_paperless_access(doc_id, authorization)  # noqa: SLF001
-            except Exception:  # noqa: BLE001
+            if self._accessible_document(doc_id, authorization) is None:
                 continue
             target_label = "entity"
             if rel.target_entity and rel.target_entity.concept:

@@ -141,9 +141,10 @@ class BulkRelationshipResult:
 
 @dataclass(frozen=True)
 class EntitySearchHit:
-    id: str
     label: str
     entity_type: str
+    id: str | None = None
+    paperless_document_id: int | None = None
     subtitle: str | None = None
     open_url: str | None = None
 
@@ -783,10 +784,12 @@ class DocumentService:
             [query, created_gte, created_lte, correspondent, document_type, tag]
         )
 
-        if classification == "unclassified" and not has_paperless_filters and sort_norm in {
-            "created",
-            "id",
-        }:
+        if (
+            classification == "unclassified"
+            and not has_paperless_filters
+            and order_norm == "desc"
+            and sort_norm in {"created", "id"}
+        ):
             # Preserve v0.4 fill-across-pages behavior for the unclassified queue.
             return self.list_unclassified(auth, page=page, page_size=size)
 
@@ -896,17 +899,29 @@ class DocumentService:
         hits: list[EntitySearchHit] = []
 
         if wanted in {"any", "concept"}:
-            concepts = self.search_concepts(
-                q=needle, ontology_code=ontology_code, limit=limit, token=auth
+            query = select(Concept).options(
+                joinedload(Concept.ontology), joinedload(Concept.entity)
             )
-            for concept in concepts:
-                row = self._session.scalar(
-                    select(Concept)
-                    .options(joinedload(Concept.ontology), joinedload(Concept.entity))
-                    .where(Concept.code == concept.code)
+            if ontology_code:
+                ontology = self._session.scalar(
+                    select(Ontology).where(Ontology.code == ontology_code)
                 )
-                if row is None:
-                    continue
+                if ontology is None:
+                    raise NotFoundError(f"Ontology '{ontology_code}' not found")
+                query = query.where(Concept.ontology_id == ontology.id)
+            if needle:
+                escaped = (
+                    needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                )
+                pattern = f"%{escaped}%"
+                query = query.where(
+                    or_(
+                        Concept.code.ilike(pattern, escape="\\"),
+                        Concept.name.ilike(pattern, escape="\\"),
+                    )
+                )
+            query = query.order_by(Concept.name).limit(limit)
+            for row in self._session.scalars(query).unique():
                 subtitle = row.ontology.code if row.ontology else None
                 hits.append(
                     EntitySearchHit(
@@ -936,7 +951,8 @@ class DocumentService:
             except PaperlessError as exc:
                 raise UpstreamError(str(exc)) from exc
             for doc in page.results:
-                entity = self._get_or_create_document_entity(doc.id)
+                # Do not create Atlas entities on search; assign creates on write.
+                ref = self._get_external_reference(doc.id)
                 meta = " · ".join(
                     part
                     for part in (doc.created_date, doc.correspondent, doc.document_type)
@@ -944,9 +960,10 @@ class DocumentService:
                 )
                 hits.append(
                     EntitySearchHit(
-                        id=str(entity.id),
+                        id=str(ref.entity_id) if ref is not None else None,
                         label=doc.title or f"Document {doc.id}",
                         entity_type="document",
+                        paperless_document_id=doc.id,
                         subtitle=meta or None,
                         open_url=self._settings.paperless_document_url(doc.id),
                     )
