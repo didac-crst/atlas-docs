@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     paperless_timeout_seconds: float = 10.0
     seed_path: str = "config/seed/v0.1.yaml"
 
-    atlasdocs_env: str = "development"
+    # Required. Do not default to development — omit means misconfigured deploy.
+    atlasdocs_env: str
     session_secret: str = DEFAULT_SESSION_SECRET
     session_secure: bool = False
     session_max_age_seconds: int = 60 * 60 * 8
@@ -38,9 +39,9 @@ class Settings(BaseSettings):
     @field_validator("atlasdocs_env")
     @classmethod
     def _normalize_env(cls, value: str) -> str:
-        normalized = value.strip().lower()
+        normalized = (value or "").strip().lower()
         if normalized not in {"development", "production"}:
-            raise ValueError("ATLASDOCS_ENV must be 'development' or 'production'")
+            raise ValueError("ATLASDOCS_ENV is required and must be 'development' or 'production'")
         return normalized
 
     @field_validator("session_secret")

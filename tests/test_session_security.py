@@ -65,7 +65,14 @@ def test_production_cookie_secure_forced() -> None:
 @pytest.mark.parametrize("value", [0, -1])
 def test_rejects_non_positive_unclassified_max_upstream_pages(value: int) -> None:
     with pytest.raises(ValidationError):
-        Settings(unclassified_max_upstream_pages=value)
+        Settings(atlasdocs_env="development", unclassified_max_upstream_pages=value)
+
+
+def test_atlasdocs_env_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ATLASDOCS_ENV", raising=False)
+    get_settings.cache_clear()
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
 
 
 def test_development_allows_insecure_http_cookies() -> None:

@@ -5,6 +5,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     SEED_PATH=/app/config/seed/v0.1.yaml
+# ATLASDOCS_ENV is intentionally unset here; the runtime must supply
+# development or production explicitly.
 
 COPY pyproject.toml README.md ./
 COPY src ./src

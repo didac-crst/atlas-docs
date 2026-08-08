@@ -19,7 +19,7 @@ def _clear_settings_cache():
 
 
 def test_default_split_database_settings() -> None:
-    settings = Settings()
+    settings = Settings(atlasdocs_env="development")
     assert settings.database_host == "db"
     assert settings.database_port == 5432
     assert settings.database_name == "atlasdocs"
@@ -43,7 +43,7 @@ def test_split_settings_from_environment(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("DATABASE_USER", "atlasdocs_app")
     monkeypatch.setenv("DATABASE_PASSWORD", "secret")
 
-    settings = Settings()
+    settings = Settings(atlasdocs_env="development")
     url = settings.sqlalchemy_url()
     assert url.host == "postgres.internal"
     assert url.port == 6543
@@ -54,7 +54,7 @@ def test_split_settings_from_environment(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_password_with_special_characters_is_escaped() -> None:
     password = "p@ss:w/ord%#?&="
-    settings = Settings(database_password=password)
+    settings = Settings(atlasdocs_env="development", database_password=password)
     url = settings.sqlalchemy_url()
 
     assert url.password == password

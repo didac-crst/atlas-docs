@@ -65,13 +65,15 @@ Environment variables:
 | `DATABASE_PASSWORD` | Database password (default `atlasdocs`; must be non-default in production) |
 | `PAPERLESS_BASE_URL` | Paperless origin, no trailing path |
 | `PAPERLESS_TIMEOUT_SECONDS` | Upstream timeout |
-| `ATLASDOCS_ENV` | `development` or `production` |
+| `ATLASDOCS_ENV` | **Required.** `development` or `production` (no silent default) |
 | `SESSION_SECRET` | Required non-default secret in production |
 | `SESSION_SECURE` | Set cookie `Secure` (required true in production) |
 | `SESSION_MAX_AGE_SECONDS` | Server-side session expiry (default 8 hours) |
 | `SEED_PATH` | Seed YAML path |
 
 The SQLAlchemy URL is built at runtime with `URL.create()` from the split `DATABASE_*` settings so passwords with special characters are escaped safely. Production should not rely on a single `DATABASE_URL` with embedded credentials. Production also rejects the default `DATABASE_PASSWORD` and default `SESSION_SECRET`.
+
+`ATLASDOCS_ENV` must be set explicitly. Omitting it fails startup instead of falling back to development defaults.
 
 The UI keeps Paperless tokens in a server-side session. The browser only receives an opaque HttpOnly session id (`SameSite=Lax`). Document JSON endpoints require an `Authorization` header on every request and forward it to Paperless. There is no service-token fallback for document access. When Paperless denies access, AtlasDocs returns 404 and does not disclose document-derived semantics.
 
