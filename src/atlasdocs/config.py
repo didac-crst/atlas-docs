@@ -63,10 +63,21 @@ class Settings(BaseSettings):
 
     @field_validator("paperless_public_url")
     @classmethod
-    def _strip_public_url(cls, value: str | None) -> str | None:
+    def _normalize_public_url(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return value.strip().rstrip("/")
+        cleaned = value.strip().rstrip("/")
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(cleaned)
+        if parts.scheme not in {"http", "https"}:
+            raise ValueError("PAPERLESS_PUBLIC_URL must be an http(s) URL")
+        if parts.username is not None or parts.password is not None:
+            raise ValueError("PAPERLESS_PUBLIC_URL must not include credentials")
+        if not parts.netloc:
+            raise ValueError("PAPERLESS_PUBLIC_URL must include a host")
+        # Rebuild without query/fragment/credentials.
+        return f"{parts.scheme}://{parts.netloc}{parts.path}".rstrip("/")
 
     @field_validator("unclassified_max_upstream_pages")
     @classmethod

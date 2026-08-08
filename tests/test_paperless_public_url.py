@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from contextlib import contextmanager
+from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -61,7 +62,23 @@ def test_paperless_document_url_strips_trailing_slash() -> None:
     assert settings.paperless_document_url(12) == "https://docs.example.test/documents/12/"
 
 
-def _client_with_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **env: str) -> TestClient:
+def test_paperless_public_url_rejects_credentials_and_non_http() -> None:
+    with pytest.raises(Exception):
+        Settings(
+            atlasdocs_env="development",
+            paperless_public_url="https://user:password@docs.example.test",
+        )
+    with pytest.raises(Exception):
+        Settings(
+            atlasdocs_env="development",
+            paperless_public_url="ftp://docs.example.test",
+        )
+
+
+@contextmanager
+def _client_with_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **env: str
+) -> Iterator[TestClient]:
     get_settings.cache_clear()
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("ATLASDOCS_ENV", "development")
@@ -103,7 +120,14 @@ def _client_with_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **env: str
     from atlasdocs.api.routes import get_paperless_client
 
     app.dependency_overrides[get_paperless_client] = override_paperless
-    return TestClient(app)
+    with TestClient(app) as client:
+        try:
+            yield client
+        finally:
+            app.dependency_overrides.clear()
+            session_store.clear()
+            reset_engine()
+            get_settings.cache_clear()
 
 
 def test_api_open_url_null_when_public_url_missing(
