@@ -245,12 +245,15 @@ class DocumentService:
             return None
 
     def _ensure_entity_readable(self, entity: Entity, token: str) -> PaperlessDocument | None:
-        paperless_id = self._paperless_id_for_entity(entity)
-        if paperless_id is None:
+        reference = entity.external_reference
+        if reference is None or reference.system != EXTERNAL_SYSTEM_PAPERLESS:
             # Concept/native entities are not Paperless-backed; still require a
             # Paperless-accepted token so callers cannot use arbitrary strings.
             self._validate_paperless_token(token)
             return None
+        paperless_id = self._paperless_id_for_entity(entity)
+        if paperless_id is None:
+            raise ValidationError("Invalid Paperless external reference")
         return self._ensure_paperless_access(paperless_id, token)
 
     def _entity_label(self, entity: Entity) -> str:
