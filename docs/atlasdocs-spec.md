@@ -1,94 +1,112 @@
-# AtlasDocs - v0.1 Architecture and Pilot
+# AtlasDocs - v0.1 Product Architecture and Semantic Core
 
 ## Objective
 
-Build a personal document-management system using Paperless-ngx as the authoritative document engine and a separate semantic layer for relationships between documents, people, organizations, countries, cases, and other concepts.
+Build a reusable semantic document layer on top of Paperless-ngx. AtlasDocs adds meaning and relationships without replacing the Paperless document engine or depending on any particular deployment environment.
 
-The initial goal is to validate Paperless-ngx, establish a stable integration boundary, and prove safe, automatic migration of legacy documents. This is not a replacement for the Paperless UI.
+AtlasDocs must never depend on Satellite. Satellite depends on AtlasDocs.
 
-## Architecture
+## Canonical integration boundary
 
-Paperless owns the original document, archived/OCR version, OCR text, previews, basic metadata, search, ingestion, permissions, and users/groups. Never modify Paperless internal PostgreSQL tables; use its supported API and webhook mechanisms.
+Paperless-ngx owns the original document, archived/OCR version, OCR text, previews, basic metadata, full-text search, ingestion, and document authorization. AtlasDocs must use supported Paperless REST API and webhook mechanisms. It must never query or modify Paperless internal PostgreSQL tables.
 
-The semantic application owns entities, concepts, ontologies, relationship types, relationships, cases/collections, and semantic metadata. A semantic document references a Paperless document ID.
-
-Paperless is the authorization authority. If a user cannot access a Paperless document, the semantic application must not expose its existence, metadata, relationships, OCR, summaries, search results, or aggregate counts derived from it. Filter authorization before returning semantic data.
-
-## Paperless pilot
-
-Deploy Paperless-ngx on Satellite using PostgreSQL, expose it through the existing HTTPS/Cloudflare infrastructure, and do not expose PostgreSQL externally. Use dedicated persistent NAS storage. Do not use the existing legacy archive as the Paperless consumption directory.
-
-Create a test user and validate authentication and permissions. Import approximately 50-100 representative files: scanned and born-digital PDFs, medical, tax, payslip, insurance, invoice, image, multi-page, selectable-text, and OCR-required documents.
-
-Validate ingestion, OCR quality, search, preview, download, mobile usability, permissions, NAS storage, backup, and restore. Do not begin bulk migration until the pilot is accepted.
-
-## Legacy migration CLI
-
-Provide a deterministic, standalone CLI such as:
+The canonical adapter boundary should provide operations equivalent to:
 
 ```text
-document-migrator scan /nas/legacy-documents
+get_document(id)
+document_exists(id)
+can_access_document(id, user_context)
+search_documents(query, user_context)
+get_document_content(id, user_context)
+get_document_metadata(id, user_context)
 ```
 
-The source archive must never be modified. Recursively inventory supported files and persist relative source path, filename, extension/MIME type, size, SHA-256, modification time, and migration state.
+The adapter may have different implementations for local HTTP, a remote deployment, or tests, but the semantic domain must not know how Paperless is hosted. This preserves deployment portability, but means AtlasDocs must not depend on Paperless database internals, filesystem paths, internal task tables, or undocumented behavior. Some low-level capabilities may be unavailable through the public API; those must be represented as explicit adapter limitations rather than implemented through coupling.
 
-States should include:
+If a user cannot access a Paperless document, AtlasDocs must not expose its existence, metadata, relationships, OCR, summaries, search results, or aggregate counts derived from it.
+
+## Semantic model
+
+AtlasDocs owns entities, ontologies, concepts, relationship types, relationships, provenance, and semantic metadata. An AtlasDocs entity UUID is independent from the external Paperless document ID.
+
+Minimum conceptual model:
 
 ```text
-DISCOVERED QUEUED UPLOADING PROCESSING IMPORTED FAILED SKIPPED DUPLICATE
+Entity
+DocumentReference -> paperless_document_id
+Ontology
+Concept
+RelationshipType
+Relationship
+RelationshipProvenance
 ```
 
-Store source path, checksum, Paperless task UUID, Paperless document ID, error details, attempt count, and timestamps. The process must be restartable and idempotent; interruption must not cause duplicate imports.
-
-Upload through the supported Paperless ingestion API or an isolated temporary staging area. Never configure the legacy archive as the consumption directory. Record task UUID, poll processing, record the Paperless document ID, and continue after failures.
-
-Support:
+Relationships should retain:
 
 ```text
---dry-run  --limit N  --path PREFIX  --retry-failed  --status  --workers N
+origin: manual | legacy-path | deterministic-rule | external-automation
+status: suggested | confirmed
+created_by
+created_at
 ```
 
-Use conservative configurable concurrency for Raspberry Pi hardware.
+Do not add tax-specific tables or a graph database in Phase 1.
 
-## Preserve legacy knowledge
-
-Retain every document's original relative NAS path. Parse folder and filename information only into optional metadata suggestions with provenance and deterministic confidence. Suggestions must not silently become authoritative relationships.
-
-## Semantic layer v0.1
+## Semantic core v0.1
 
 Use version-controlled seed/configuration files instead of a complete ontology editor. Initial concepts are Document, Person, Organization, Country, and Case/Collection. Initial vocabularies are document type, domain, country, and status. Initial relationships are concerns, issued_by, source_country, jurisdiction, belongs_to, and document_type.
 
-## Semantic UI v0.1
-
-Do not rebuild Paperless. Provide an Inbox/Needs Classification view, a semantic document page showing Paperless title/date and semantic relationships, an Open in Paperless link, a classification form with predefined/context-aware relationships, batch classification, and an optional advanced Add relationship action.
-
-Batch classification is required for legacy migration, for example assigning Domain=Tax, Country=Germany, Period=2023, and Tax concept=Employment income to a group.
-
-## Synchronization
-
-Discover newly created Paperless documents, create or match semantic entities, detect deleted/unavailable Paperless documents, and prevent orphaned semantic results. Prefer supported Paperless webhooks where appropriate and provide:
+The first proof should be:
 
 ```text
-semantic-sync reconcile
+Paperless document 184
+        -> AtlasDocs document entity UUID
+        -> source-country: Germany
+        -> document-type: Payslip
 ```
 
-The command compares Paperless document IDs with semantic references and reports inconsistencies.
+The Paperless ID is an external reference, never the AtlasDocs entity primary key.
 
-## Out of scope for v0.1
+## REST API Phase 1
 
-Do not build an ontology visual editor, graph visualization, custom PDF viewer, Paperless UI replacement, MCP server, LLM classification, LLM summaries, embeddings/vector database, complex semantic ACLs, or automatic deletion of legacy documents.
+Provide only the smallest useful API:
 
-## Acceptance criteria
+```text
+GET    /documents/{paperless_id}/semantics
+POST   /documents/{paperless_id}/relationships
+DELETE /relationships/{id}
+GET    /ontologies
+GET    /ontologies/{code}/concepts
+GET    /relationship-types
+```
 
-1. Paperless runs reliably on Satellite and works through secure HTTPS.
-2. Representative documents ingest, OCR, preview, download, and search correctly.
-3. Paperless permissions behave correctly.
-4. A migration dry-run inventories the legacy archive.
-5. At least 100 legacy documents migrate automatically.
-6. Interrupted migration resumes without duplicates.
-7. Each migrated document maps source path, checksum, and Paperless ID.
-8. The semantic database attaches relationships to Paperless documents.
-9. A small semantic UI classifies documents and links to Paperless.
-10. Semantic results never expose documents unavailable to the authenticated user.
+The API must validate Paperless access before returning or mutating document-derived semantic data. It must reject invalid targets and handle duplicate relationships deterministically.
 
-Only after these criteria are met should ontology expansion, automatic classification, LLM enrichment, or MCP integration begin.
+## Legacy migration boundary
+
+A deterministic migration CLI may later inventory a deployment-supplied source archive without modifying it. It should record relative path, MIME type, size, SHA-256, modification time, Paperless task/document IDs, attempts, errors, and idempotent migration state.
+
+The source location, concurrency, Paperless URL, and storage paths belong to the deployment repository, not this public product repository. Legacy path parsing creates provenance-bearing suggestions and must not silently create confirmed relationships.
+
+## UI and synchronization
+
+The UI is a later phase. It should not rebuild Paperless; it may provide an Inbox/Needs Classification view, semantic document detail, relationship classification, batch classification, and a link to Paperless.
+
+Synchronization may later discover new Paperless documents, create/match AtlasDocs document entities, detect unavailable documents, and provide a reconciliation command. It must use the Paperless API/webhooks rather than database access.
+
+## Out of scope for Phase 1
+
+Do not build a frontend, ontology visual editor, graph visualization, custom PDF viewer, Paperless UI replacement, MCP server, LLM classification, LLM summaries, embeddings/vector databases, complex semantic ACLs, automatic deletion, or Supernova orchestration.
+
+## Phase 1 acceptance criteria
+
+1. AtlasDocs runs independently of Satellite.
+2. PostgreSQL migrations are reproducible.
+3. Entities, document references, ontologies, concepts, relationship types, and relationships can be created.
+4. Seed data creates country and document-type concepts.
+5. A document reference points to a Paperless document ID without using it as the AtlasDocs entity ID.
+6. The Paperless adapter retrieves document metadata through the supported API.
+7. Authorization is checked before document-derived semantic data is returned.
+8. Duplicate relationships and invalid targets are rejected or handled deterministically.
+9. Tests cover the semantic model and Paperless adapter using mocks.
+10. No frontend, LLM, MCP, embedding, graph database, or Supernova code is required for completion.
