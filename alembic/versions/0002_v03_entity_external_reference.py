@@ -71,19 +71,23 @@ def upgrade() -> None:
         sa.UniqueConstraint("system", "external_id", name="uq_external_reference_system_id"),
     )
 
-    docs = bind.execute(
+    docs = bind.execution_options(stream_results=True).execute(
         sa.text(
             "SELECT entity_id, paperless_document_id, created_at FROM document_references"
         )
-    ).fetchall()
-    if docs:
+    )
+    insert_external_reference = sa.text(
+        """
+        INSERT INTO external_references (id, entity_id, system, external_id, created_at)
+        VALUES (:id, :entity_id, 'paperless', :external_id, :created_at)
+        """
+    )
+    while True:
+        batch = docs.fetchmany(1000)
+        if not batch:
+            break
         bind.execute(
-            sa.text(
-                """
-                INSERT INTO external_references (id, entity_id, system, external_id, created_at)
-                VALUES (:id, :entity_id, 'paperless', :external_id, :created_at)
-                """
-            ),
+            insert_external_reference,
             [
                 {
                     "id": str(uuid.uuid4()),
@@ -91,7 +95,7 @@ def upgrade() -> None:
                     "external_id": str(paperless_document_id),
                     "created_at": created_at,
                 }
-                for entity_id, paperless_document_id, created_at in docs
+                for entity_id, paperless_document_id, created_at in batch
             ],
         )
 
