@@ -139,15 +139,34 @@ class DocumentService:
         self._session = session
         self._paperless = paperless
         self._settings = get_settings()
+        self._paperless_doc_cache: dict[tuple[str, int], PaperlessDocument] = {}
+        self._validated_tokens: set[str] = set()
 
     def _require_token(self, token: str | None) -> str:
         if not token:
             raise UnauthorizedError("Authorization header required")
         return token
 
-    def _ensure_paperless_access(self, paperless_document_id: int, token: str) -> PaperlessDocument:
+    def _validate_paperless_token(self, token: str) -> None:
+        if token in self._validated_tokens:
+            return
         try:
-            return self._paperless.assert_accessible(paperless_document_id, token=token)
+            self._paperless.validate_token(token)
+        except PaperlessAuthError as exc:
+            raise UnauthorizedError("Invalid Paperless credentials") from exc
+        except PaperlessUnavailableError as exc:
+            raise UpstreamError(str(exc)) from exc
+        except PaperlessError as exc:
+            raise UpstreamError(str(exc)) from exc
+        self._validated_tokens.add(token)
+
+    def _ensure_paperless_access(self, paperless_document_id: int, token: str) -> PaperlessDocument:
+        cache_key = (token, paperless_document_id)
+        cached = self._paperless_doc_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            document = self._paperless.assert_accessible(paperless_document_id, token=token)
         except PaperlessAuthError as exc:
             raise ForbiddenDocumentError(str(exc)) from exc
         except PaperlessNotFoundError as exc:
@@ -156,6 +175,9 @@ class DocumentService:
             raise UpstreamError(str(exc)) from exc
         except PaperlessError as exc:
             raise UpstreamError(str(exc)) from exc
+        self._paperless_doc_cache[cache_key] = document
+        self._validated_tokens.add(token)
+        return document
 
     def _paperless_external_id(self, paperless_document_id: int) -> str:
         return str(paperless_document_id)
@@ -167,6 +189,10 @@ class DocumentService:
                 ExternalReference.external_id == self._paperless_external_id(paperless_document_id),
             )
         )
+
+    def get_external_reference(self, paperless_document_id: int) -> ExternalReference | None:
+        """Public helper for reconciliation flows."""
+        return self._get_external_reference(paperless_document_id)
 
     def get_or_create_document_entity(self, paperless_document_id: int) -> Entity:
         """Public helper for reconciliation and document flows."""
@@ -221,6 +247,9 @@ class DocumentService:
     def _ensure_entity_readable(self, entity: Entity, token: str) -> PaperlessDocument | None:
         paperless_id = self._paperless_id_for_entity(entity)
         if paperless_id is None:
+            # Concept/native entities are not Paperless-backed; still require a
+            # Paperless-accepted token so callers cannot use arbitrary strings.
+            self._validate_paperless_token(token)
             return None
         return self._ensure_paperless_access(paperless_id, token)
 
@@ -678,7 +707,10 @@ class DocumentService:
         q: str = "",
         ontology_code: str | None = None,
         limit: int = 25,
+        token: str | None = None,
     ) -> list[ConceptView]:
+        auth = self._require_token(token)
+        self._validate_paperless_token(auth)
         query = select(Concept).options(joinedload(Concept.ontology))
         if ontology_code:
             ontology = self._session.scalar(select(Ontology).where(Ontology.code == ontology_code))
@@ -798,7 +830,9 @@ class DocumentService:
                 self._session.delete(companion)
                 self._session.flush()
 
-    def list_relationship_types(self) -> list[RelationshipTypeView]:
+    def list_relationship_types(self, token: str | None = None) -> list[RelationshipTypeView]:
+        auth = self._require_token(token)
+        self._validate_paperless_token(auth)
         rows = self._session.scalars(
             select(RelationshipType).options(
                 joinedload(RelationshipType.target_ontology),
@@ -827,7 +861,9 @@ class DocumentService:
         codes.sort()
         return codes
 
-    def list_concepts(self, ontology_code: str) -> list[ConceptView]:
+    def list_concepts(self, ontology_code: str, token: str | None = None) -> list[ConceptView]:
+        auth = self._require_token(token)
+        self._validate_paperless_token(auth)
         ontology = self._session.scalar(select(Ontology).where(Ontology.code == ontology_code))
         if ontology is None:
             raise NotFoundError(f"Ontology '{ontology_code}' not found")

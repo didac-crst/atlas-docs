@@ -30,7 +30,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         default=None,
-        help="Maximum Paperless documents to scan",
+        help="Maximum Paperless documents to scan (also limits missing/inaccessible checks to those ids)",
     )
     reconcile.add_argument(
         "--page-size",

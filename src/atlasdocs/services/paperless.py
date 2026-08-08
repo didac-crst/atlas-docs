@@ -166,6 +166,10 @@ class PaperlessClient:
     def assert_accessible(self, document_id: int, token: str) -> PaperlessDocument:
         return self.get_document(document_id, token=token)
 
+    def validate_token(self, token: str) -> None:
+        """Verify the token is accepted by Paperless (does not authorize a document)."""
+        self.list_documents(token, page=1, page_size=1)
+
     def iter_all_documents(self, token: str, *, page_size: int = 100, limit: int | None = None):
         """Yield Paperless documents across pages until exhausted or ``limit`` reached."""
         page = 1

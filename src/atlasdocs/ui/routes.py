@@ -334,7 +334,7 @@ def list_relationship_types(
     request: Request,
     service: DocumentService = Depends(get_ui_service),
 ) -> JSONResponse:
-    ui_session, _auth = _require_ui_auth(request)
+    ui_session, auth = _require_ui_auth(request)
     payload = [
         RelationshipTypeResponse(
             code=item.code,
@@ -343,7 +343,7 @@ def list_relationship_types(
             directionality=item.directionality,
             inverse=item.inverse,
         )
-        for item in service.list_relationship_types()
+        for item in service.list_relationship_types(auth)
     ]
     response = JSONResponse(content=[item.model_dump() for item in payload])
     set_session_cookie(response, ui_session)
@@ -357,9 +357,9 @@ def search_concepts(
     ontology: str | None = Query(default=None),
     service: DocumentService = Depends(get_ui_service),
 ) -> JSONResponse:
-    ui_session, _auth = _require_ui_auth(request)
+    ui_session, auth = _require_ui_auth(request)
     try:
-        concepts = service.search_concepts(q=q, ontology_code=ontology)
+        concepts = service.search_concepts(q=q, ontology_code=ontology, token=auth)
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
     payload = [ConceptResponse(code=item.code, name=item.name) for item in concepts]

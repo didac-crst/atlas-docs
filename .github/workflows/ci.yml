@@ -143,11 +143,12 @@ jobs:
           python -m venv .venv
           .venv/bin/pip install -e ".[dev]"
 
-      - name: Build SPA
+      - name: Build SPA into src/atlasdocs/ui/spa
         working-directory: frontend
         run: |
           npm install
           npm run build
+          test -f ../src/atlasdocs/ui/spa/index.html
 
       - name: Install Playwright
         run: |

@@ -130,9 +130,14 @@ def test_reconcile_idempotent_and_reports_missing_inaccessible(
     body = first.json()
     assert body["paperless_documents_seen"] >= 2
     assert 184 in body["created"] or 184 in body["already_present"]
-    assert 999 in body["missing_in_paperless"]
-    assert 186 in body["inaccessible_in_paperless"]
-    assert "not deleted" in body["human_summary"].lower()
+
+    # Limited runs only verify references for scanned Paperless ids. A full run
+    # reports missing/inaccessible refs across the AtlasDocs store.
+    full = client.post("/reconcile", headers=AUTH, json={"dry_run": True})
+    assert full.status_code == 200
+    assert 999 in full.json()["missing_in_paperless"]
+    assert 186 in full.json()["inaccessible_in_paperless"]
+    assert "not deleted" in full.json()["human_summary"].lower()
 
     second = client.post("/reconcile", headers=AUTH, json={"dry_run": False})
     assert second.status_code == 200

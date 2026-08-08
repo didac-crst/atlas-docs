@@ -11,9 +11,19 @@ test("connect, classify, reconcile without leaking token", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /Needs classification/i })).toBeVisible();
   await expect(page.getByText(secret)).toHaveCount(0);
 
-  const storage = await page.evaluate(() => JSON.stringify(window.localStorage));
-  expect(storage).not.toContain(secret);
-  expect(storage.toLowerCase()).not.toContain("token ");
+  const storageDump = await page.evaluate(() => {
+    const dump = (store: Storage) => {
+      const entries: Record<string, string> = {};
+      for (let i = 0; i < store.length; i += 1) {
+        const key = store.key(i);
+        if (key) entries[key] = store.getItem(key) || "";
+      }
+      return entries;
+    };
+    return { local: dump(window.localStorage), session: dump(window.sessionStorage) };
+  });
+  expect(JSON.stringify(storageDump)).not.toContain(secret);
+  expect(JSON.stringify(storageDump).toLowerCase()).not.toContain("token ");
 
   // Deep-link so viewport-specific queue hide rules and shared e2e DB state cannot block.
   await page.goto("./documents/184");

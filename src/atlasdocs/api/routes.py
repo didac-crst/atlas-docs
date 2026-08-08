@@ -289,7 +289,10 @@ def list_relationship_types(
     authorization: str = Depends(require_authorization),
     service: DocumentService = Depends(get_document_service),
 ) -> list[RelationshipTypeResponse]:
-    _ = authorization
+    try:
+        items = service.list_relationship_types(authorization)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
     return [
         RelationshipTypeResponse(
             code=item.code,
@@ -298,7 +301,7 @@ def list_relationship_types(
             directionality=item.directionality,
             inverse=item.inverse,
         )
-        for item in service.list_relationship_types()
+        for item in items
     ]
 
 
@@ -308,9 +311,8 @@ def list_concepts(
     authorization: str = Depends(require_authorization),
     service: DocumentService = Depends(get_document_service),
 ) -> list[ConceptResponse]:
-    _ = authorization
     try:
-        concepts = service.list_concepts(ontology_code)
+        concepts = service.list_concepts(ontology_code, token=authorization)
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
     return [ConceptResponse(code=item.code, name=item.name) for item in concepts]

@@ -82,7 +82,7 @@ class ReconcileService:
             ):
                 summary.paperless_documents_seen += 1
                 seen_ids.add(doc.id)
-                existing = self._documents._get_external_reference(doc.id)
+                existing = self._documents.get_external_reference(doc.id)
                 if existing is not None:
                     summary.already_present.append(doc.id)
                     continue
@@ -107,9 +107,8 @@ class ReconcileService:
                 )
                 continue
             if limit is not None and paperless_id not in seen_ids:
-                # When limited, only report missing/inaccessible for documents we scanned
-                # plus any refs for those ids; still check refs outside the scan set.
-                pass
+                # Limited runs only verify references for documents scanned above.
+                continue
             try:
                 self._paperless.assert_accessible(paperless_id, token=token)
             except PaperlessNotFoundError:

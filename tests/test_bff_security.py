@@ -46,6 +46,17 @@ def test_bff_rejects_unauthenticated_requests(client: TestClient) -> None:
     )
 
 
+def test_api_rejects_unverified_paperless_token(
+    client: TestClient, paperless_transport
+) -> None:
+    paperless_transport.list_denied = True
+    denied = client.get(
+        "/relationship-types",
+        headers={"Authorization": "Token forged-token"},
+    )
+    assert denied.status_code == 401
+
+
 def test_csrf_protects_relationship_mutations(client: TestClient) -> None:
     csrf = _connect(client)
     missing = client.post(

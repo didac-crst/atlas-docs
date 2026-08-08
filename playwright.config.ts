@@ -17,10 +17,10 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `env ATLASDOCS_ENV=development SESSION_SECRET=e2e-session-secret SESSION_SECURE=false PYTHONPATH=src:. ${python} -m uvicorn tests.e2e_app:app --host 127.0.0.1 --port ${PORT}`,
+    command: `test -f src/atlasdocs/ui/spa/index.html || (cd frontend && npm run build); env ATLASDOCS_ENV=development SESSION_SECRET=e2e-session-secret SESSION_SECURE=false PYTHONPATH=src:. ${python} -m uvicorn tests.e2e_app:app --host 127.0.0.1 --port ${PORT}`,
     url: `${BASE}/health`,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
   },
   projects: [
     {
