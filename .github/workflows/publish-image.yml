@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - docs/v0.1-vertical-slice-roadmap
     tags:
       - "v*"
   workflow_dispatch:
