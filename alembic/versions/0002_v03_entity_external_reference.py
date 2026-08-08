@@ -26,6 +26,9 @@ def _fk_name(bind, table: str, column: str, fallback: str) -> str:
 def upgrade() -> None:
     bind = op.get_bind()
 
+    # Revision ids exceed Alembic's default VARCHAR(32) version_num column.
+    op.execute(sa.text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"))
+
     op.add_column("entities", sa.Column("entity_type", sa.String(length=64), nullable=True))
     op.execute(
         sa.text(
