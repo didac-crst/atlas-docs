@@ -5,6 +5,7 @@ ADRs capture durable decisions that shape the schema or security boundary.
 | ADR | Title |
 | --- | --- |
 | [0001](0001-entity-external-reference.md) | Entity + ExternalReference replaces document_references |
+| [0002](0002-v05-session-ingest-security.md) | v0.5 durable sessions, job tokens, and ingest security |
 
 ## Format
 

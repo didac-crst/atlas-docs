@@ -11,16 +11,20 @@ Historical milestone plans live under [archive/](archive/).
 - Deterministic Paperless reconciliation without auto-delete
 - React + TypeScript + Vite classification workbench with BFF session/CSRF
 
-## Next (v0.5 candidates)
+## Next (v0.5)
 
-Exact scope is not locked. Sensible candidates (any subset):
+Specification (design only until implemented):
+[v0.5 ingestion & classification spec](v0.5-ingestion-classification-spec.md)
+· security decisions [ADR 0002](adr/0002-v05-session-ingest-security.md).
 
-- Hardening and operator ergonomics (reconcile UX, clearer orphan workflows)
-- Broader seed / relationship catalog without new infrastructure
-- Documentation and release packaging polish
-- Optional background-friendly reconcile *design* (implementation may stay deferred)
+Planned themes:
 
-Do not treat this list as committed delivery.
+- Paperless username/password → server-side token exchange
+- Durable PostgreSQL sessions + asynchronous ingestion jobs
+- Searchable / filterable classification workbench and bulk assignment
+- Task-oriented home navigation
+
+Do not treat unchecked implementation PRs as shipped.
 
 ## Explicitly deferred
 
@@ -35,7 +39,7 @@ Not implemented and not implied by current docs:
 - Evidence / case management product surface
 - Bulk legacy migration tooling beyond Alembic schema history
 - Automatic deletion of semantic data when Paperless removes documents
-- Background workers and webhook ingestion (ReconcileService is ready to call)
+- Background workers beyond the single v0.5 ingest worker; webhook ingestion
 - Private-deployment-specific scheduling, tunnels, or secret wiring
 
 ## Public product rule
