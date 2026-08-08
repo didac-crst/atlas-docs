@@ -1,6 +1,6 @@
 # AtlasDocs frontend
 
-Canonical description of the classification workbench (post-v0.4).
+Canonical description of the SPA workbench (post-v0.5).
 
 ## Stack
 
@@ -19,10 +19,11 @@ No Redux, Next.js, graph visualization libraries, LLMs, or MCP in the UI.
 
 ## Security
 
-- Paperless tokens are accepted only by `POST /ui/api/connect` and stored in
-  the **server-side** HttpOnly session.
-- Tokens never appear in HTML, JavaScript, browser storage, or API JSON
-  responses to the browser.
+- Primary login: `POST /ui/api/login` with username/password (server-side token
+  exchange). Advanced: `POST /ui/api/connect` token paste for local/dev.
+- Tokens and passwords never appear in HTML, JavaScript, browser storage, or
+  API JSON responses to the browser.
+- Sessions are PostgreSQL-backed (opaque `atlasdocs_sid` cookie only).
 - Mutating BFF calls require the session cookie and `X-CSRF-Token`. CSRF
   rotates after successful mutations.
 - Unauthorized or inaccessible Paperless documents return 404 from the BFF
@@ -56,23 +57,46 @@ sequenceDiagram
 Programmatic clients use `/documents` and `/entities` with an `Authorization`
 header. The SPA does not send the Paperless token to those paths.
 
+## Routes
+
+| Path | Screen |
+| --- | --- |
+| `/ui/` | Home task chooser |
+| `/ui/classify` | Searchable classification workbench + bulk assign |
+| `/ui/ingest` | Upload + ingestion job list |
+| `/ui/documents/:id` | Document detail + composer |
+| `/ui/reconcile` | Reconciliation |
+| `/ui/connect` | Login / account |
+
 ## BFF endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/ui/api/session` | `{authenticated, csrf_token}` |
-| POST | `/ui/api/connect` | Store Paperless token server-side |
-| POST | `/ui/api/disconnect` | Invalidate session |
-| GET | `/ui/api/documents` | Unclassified queue |
+| POST | `/ui/api/login` | Username/password → server-side token |
+| POST | `/ui/api/connect` | Advanced token paste (dev fallback) |
+| POST | `/ui/api/disconnect` | Invalidate UI session |
+| GET | `/ui/api/home` | Authz-safe task counts + recent activity |
+| GET | `/ui/api/documents` | List with `q`, `classification`, `sort`, `order`, `page` |
+| POST | `/ui/api/documents/bulk-relationships` | Bulk assign (per-doc authz) |
 | GET | `/ui/api/documents/{id}` | Document detail + relationships |
-| POST | `/ui/api/documents/{id}/relationships` | Add relationship |
+| POST | `/ui/api/documents/{id}/relationships` | Add relationship (prefer `target_entity_id`) |
 | DELETE | `/ui/api/relationships/{id}` | Remove relationship |
 | GET | `/ui/api/relationship-types` | Typed relationship catalog |
+| GET | `/ui/api/entities/search` | Atlas entity autocomplete (`q`, `entity_type`, `ontology`) |
 | GET | `/ui/api/concepts` | Concept autocomplete (`q`, `ontology`) |
+| POST | `/ui/api/ingest` | Multipart upload → durable job |
+| GET | `/ui/api/ingest/jobs` | Current identity’s jobs |
+| GET | `/ui/api/ingest/jobs/{id}` | Job status |
 | POST | `/ui/api/reconcile` | Dry-run / apply reconciliation |
 
-SPA shell routes (`/ui`, `/ui/connect`, `/ui/documents/:id`, `/ui/reconcile`)
-serve `index.html`. `/ui/api/*` is never shadowed by the SPA fallback.
+SPA shell routes serve `index.html`. `/ui/api/*` is never shadowed by the SPA
+fallback.
+
+The relationship composer resolves **Atlas entity** targets via
+`/ui/api/entities/search` (no raw Paperless ID field in the progressive UI).
+Paperless identifiers stay in technical details; document detail offers
+**Open original** via `PAPERLESS_PUBLIC_URL` when configured.
 
 ## Product character and brand
 

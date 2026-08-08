@@ -1,17 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ApiError,
   fetchDocument,
-  fetchQueue,
+  fetchDocuments,
   fetchRelationshipTypes,
   getSession,
+  type ClassificationFilter,
+  type CompletenessFilter,
   type DocumentDetail,
+  type DocumentSort,
   type QueuePage,
   type RelationshipType,
   type SessionInfo,
+  type SortOrder,
 } from "../api/client";
-import { DocumentQueue } from "../components/DocumentQueue";
+import { DocumentQueue, type QueueFilters } from "../components/DocumentQueue";
 import { RelationshipComposer } from "../components/RelationshipComposer";
 import { SemanticDocumentDetail } from "../components/SemanticDocumentDetail";
 
@@ -20,12 +24,51 @@ type Props = {
   onSession: (session: SessionInfo) => void;
 };
 
+function parseClassification(value: string | null): ClassificationFilter {
+  if (value === "classified" || value === "any" || value === "unclassified") return value;
+  return "unclassified";
+}
+
+function parseCompleteness(value: string | null): CompletenessFilter {
+  if (value === "empty" || value === "partial" || value === "complete" || value === "any") {
+    return value;
+  }
+  return "any";
+}
+
+function parseSort(value: string | null): DocumentSort {
+  if (value === "title" || value === "correspondent" || value === "added" || value === "created") {
+    return value;
+  }
+  return "created";
+}
+
+function parseOrder(value: string | null): SortOrder {
+  return value === "asc" ? "asc" : "desc";
+}
+
 export function WorkbenchPage({ session, onSession }: Props) {
   const params = useParams();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const page = Number(searchParams.get("page") || "1") || 1;
   const selectedId = params.paperlessId ? Number(params.paperlessId) : null;
+
+  const filters: QueueFilters = useMemo(
+    () => ({
+      q: searchParams.get("q") || "",
+      classification: parseClassification(searchParams.get("classification")),
+      sort: parseSort(searchParams.get("sort")),
+      order: parseOrder(searchParams.get("order")),
+      created_gte: searchParams.get("created_gte") || "",
+      created_lte: searchParams.get("created_lte") || "",
+      correspondent: searchParams.get("correspondent") || "",
+      document_type: searchParams.get("document_type") || "",
+      tag: searchParams.get("tag") || "",
+      completeness: parseCompleteness(searchParams.get("completeness")),
+    }),
+    [searchParams],
+  );
 
   const [queue, setQueue] = useState<QueuePage | null>(null);
   const [document, setDocument] = useState<DocumentDetail | null>(null);
@@ -40,6 +83,57 @@ export function WorkbenchPage({ session, onSession }: Props) {
     return next;
   }
 
+  function buildListParams(overrides: Partial<QueueFilters> & { page?: number } = {}) {
+    return {
+      page: overrides.page ?? page,
+      q: overrides.q ?? filters.q,
+      classification: overrides.classification ?? filters.classification,
+      sort: overrides.sort ?? filters.sort,
+      order: overrides.order ?? filters.order,
+      created_gte: overrides.created_gte ?? filters.created_gte,
+      created_lte: overrides.created_lte ?? filters.created_lte,
+      correspondent: overrides.correspondent ?? filters.correspondent,
+      document_type: overrides.document_type ?? filters.document_type,
+      tag: overrides.tag ?? filters.tag,
+      completeness: overrides.completeness ?? filters.completeness,
+    };
+  }
+
+  function listSearchString(overrides: Partial<QueueFilters> & { page?: number } = {}) {
+    const next = buildListParams(overrides);
+    const params = new URLSearchParams();
+    if (next.page > 1) params.set("page", String(next.page));
+    if (next.q.trim()) params.set("q", next.q.trim());
+    if (next.classification !== "unclassified") {
+      params.set("classification", next.classification);
+    }
+    if (next.sort !== "created") params.set("sort", next.sort);
+    if (next.order !== "desc") params.set("order", next.order);
+    if (next.created_gte.trim()) params.set("created_gte", next.created_gte.trim());
+    if (next.created_lte.trim()) params.set("created_lte", next.created_lte.trim());
+    if (next.correspondent.trim()) params.set("correspondent", next.correspondent.trim());
+    if (next.document_type.trim()) params.set("document_type", next.document_type.trim());
+    if (next.tag.trim()) params.set("tag", next.tag.trim());
+    if (next.completeness !== "any") params.set("completeness", next.completeness);
+    const query = params.toString();
+    return query ? `?${query}` : "";
+  }
+
+  function pageHref(targetPage: number) {
+    return `/classify${listSearchString({ page: targetPage })}`;
+  }
+
+  function onFiltersChange(next: Partial<QueueFilters> & { page?: number }) {
+    const query = listSearchString(next);
+    setSearchParams(new URLSearchParams(query.startsWith("?") ? query.slice(1) : query), {
+      replace: true,
+    });
+  }
+
+  async function reloadQueue() {
+    return fetchDocuments(buildListParams());
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -47,7 +141,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
       setError(null);
       try {
         const [queuePage, relTypes] = await Promise.all([
-          fetchQueue(page),
+          fetchDocuments(buildListParams()),
           fetchRelationshipTypes(),
         ]);
         if (cancelled) return;
@@ -74,7 +168,28 @@ export function WorkbenchPage({ session, onSession }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [page, selectedId, navigate]);
+  }, [
+    page,
+    selectedId,
+    filters.q,
+    filters.classification,
+    filters.sort,
+    filters.order,
+    filters.created_gte,
+    filters.created_lte,
+    filters.correspondent,
+    filters.document_type,
+    filters.tag,
+    filters.completeness,
+    navigate,
+  ]);
+
+  const panelTitle =
+    filters.classification === "classified"
+      ? "Classified documents"
+      : filters.classification === "any"
+        ? "Documents"
+        : "Needs classification";
 
   return (
     <div className={`workbench${selectedId ? " detail-open" : ""}`}>
@@ -90,7 +205,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
       ) : null}
 
       <section className="panel queue-panel" aria-labelledby="queue-title">
-        <h1 id="queue-title">Needs classification</h1>
+        <h1 id="queue-title">{panelTitle}</h1>
         {loading && !queue ? (
           <p role="status">Loading queue…</p>
         ) : (
@@ -98,7 +213,18 @@ export function WorkbenchPage({ session, onSession }: Props) {
             queue={queue}
             selectedId={selectedId}
             page={page}
-            onSelect={(id) => navigate(`/documents/${id}?page=${page}`)}
+            filters={filters}
+            types={types}
+            csrfToken={session.csrf_token}
+            pageHref={pageHref}
+            onSelect={(id) => navigate(`/documents/${id}${listSearchString()}`)}
+            onFiltersChange={onFiltersChange}
+            onBulkDone={async (message) => {
+              setNotice(message);
+              await refreshCsrf();
+              setQueue(await reloadQueue());
+            }}
+            onError={setError}
           />
         )}
       </section>
@@ -107,19 +233,23 @@ export function WorkbenchPage({ session, onSession }: Props) {
         {selectedId && document ? (
           <>
             <div className="sticky-actions" style={{ top: 0 }}>
-              <Link className="btn btn-secondary" to={`/?page=${page}`}>
+              <Link className="btn btn-secondary" to={`/classify${listSearchString()}`}>
                 Back to queue
               </Link>
             </div>
             <SemanticDocumentDetail
               document={document}
               csrfToken={session.csrf_token}
+              onAddRelationship={() => {
+                window.document
+                  .getElementById("relationship-composer")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
               onRemoved={async (nextDoc, message) => {
                 setDocument(nextDoc);
                 setNotice(message);
                 await refreshCsrf();
-                const queuePage = await fetchQueue(page);
-                setQueue(queuePage);
+                setQueue(await reloadQueue());
               }}
               onError={setError}
             />
@@ -131,8 +261,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
                 setDocument(nextDoc);
                 setNotice("Relationship saved");
                 await refreshCsrf();
-                const queuePage = await fetchQueue(page);
-                setQueue(queuePage);
+                setQueue(await reloadQueue());
               }}
               onError={setError}
             />
@@ -143,8 +272,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
           <>
             <h1 id="detail-title">Select a document</h1>
             <p className="empty">
-              Choose an unclassified Paperless document from the queue to assign typed
-              relationships.
+              Choose a document from the queue to assign typed relationships.
             </p>
           </>
         )}

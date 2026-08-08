@@ -17,7 +17,8 @@ from atlasdocs.db.models import (
 )
 from atlasdocs.db.seed import seed_from_path
 from atlasdocs.db.session import get_engine, get_session_factory, reset_engine
-from atlasdocs.ui.sessions import session_store
+from atlasdocs.db.session import get_session_factory
+from atlasdocs.ui.sessions import DbSessionStore
 AUTH = {"Authorization": "Token test-token"}
 SEED_PATH = Path(__file__).resolve().parents[1] / "config" / "seed" / "v0.1.yaml"
 
@@ -447,9 +448,13 @@ def test_session_cookie_is_opaque_and_excludes_paperless_token(client: TestClien
     assert secret not in cookie_value
     assert "Token" not in cookie_value
 
-    stored = session_store.get(cookie_value)
-    assert stored is not None
-    assert stored.paperless_authorization == f"Token {secret}"
+    db = get_session_factory()()
+    try:
+        stored = DbSessionStore(db).get(cookie_value)
+        assert stored is not None
+        assert stored.paperless_authorization == f"Token {secret}"
+    finally:
+        db.close()
 
 
 def test_ui_logout_invalidates_server_session(client: TestClient) -> None:
@@ -459,7 +464,11 @@ def test_ui_logout_invalidates_server_session(client: TestClient) -> None:
         json={"csrf_token": csrf, "paperless_token": "test-token"},
     )
     sid = client.cookies.get("atlasdocs_sid")
-    assert session_store.get(sid) is not None
+    db = get_session_factory()()
+    try:
+        assert DbSessionStore(db).get(sid) is not None
+    finally:
+        db.close()
 
     csrf = client.get("/ui/api/session").json()["csrf_token"]
     disconnected = client.post(
@@ -469,7 +478,11 @@ def test_ui_logout_invalidates_server_session(client: TestClient) -> None:
     )
     assert disconnected.status_code == 200
     assert disconnected.json()["authenticated"] is False
-    assert session_store.get(sid) is None
+    db = get_session_factory()()
+    try:
+        assert DbSessionStore(db).get(sid) is None
+    finally:
+        db.close()
     assert client.get("/ui/api/documents").status_code == 401
 
 

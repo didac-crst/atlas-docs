@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import BinaryIO
+from urllib.parse import urlencode
 
 import httpx
 
@@ -21,6 +23,10 @@ class PaperlessUnavailableError(PaperlessError):
     """Paperless timed out or returned a server error."""
 
 
+class PaperlessDuplicateError(PaperlessError):
+    """Paperless rejected the upload as a duplicate document."""
+
+
 @dataclass(frozen=True)
 class PaperlessDocument:
     id: int
@@ -38,6 +44,14 @@ class PaperlessDocumentPage:
     results: list[PaperlessDocument]
     has_next: bool
     has_previous: bool
+
+
+@dataclass(frozen=True)
+class PaperlessTaskStatus:
+    task_id: str
+    status: str  # PENDING | STARTED | SUCCESS | FAILURE | ...
+    related_document_id: int | None = None
+    result: str | None = None
 
 
 def _label_from_field(value: object) -> str | None:
@@ -70,15 +84,36 @@ class PaperlessClient:
         self._correspondent_names: dict[int, str | None] = {}
         self._document_type_names: dict[int, str | None] = {}
 
-    def _headers(self, token: str) -> dict[str, str]:
+    def _headers(self, token: str | None = None) -> dict[str, str]:
+        if not token:
+            return {}
         if token.lower().startswith("token ") or token.lower().startswith("bearer "):
             return {"Authorization": token}
         return {"Authorization": f"Token {token}"}
 
-    def _request(self, method: str, url: str, token: str) -> httpx.Response:
+    def _client(self) -> httpx.Client:
+        return httpx.Client(timeout=self._timeout, transport=self._transport)
+
+    def _request(
+        self,
+        method: str,
+        url: str,
+        token: str | None = None,
+        *,
+        json: object | None = None,
+        files: object | None = None,
+        data: object | None = None,
+    ) -> httpx.Response:
         try:
-            with httpx.Client(timeout=self._timeout, transport=self._transport) as client:
-                return client.request(method, url, headers=self._headers(token))
+            with self._client() as client:
+                return client.request(
+                    method,
+                    url,
+                    headers=self._headers(token),
+                    json=json,
+                    files=files,
+                    data=data,
+                )
         except httpx.TimeoutException as exc:
             raise PaperlessUnavailableError("Paperless request timed out") from exc
         except httpx.HTTPError as exc:
@@ -93,6 +128,9 @@ class PaperlessClient:
         if response.status_code >= 500:
             raise PaperlessUnavailableError(f"Paperless returned HTTP {response.status_code}")
         if response.status_code >= 400:
+            body = (response.text or "").lower()
+            if "duplicate" in body:
+                raise PaperlessDuplicateError("Paperless rejected duplicate document")
             raise PaperlessUnavailableError(f"Paperless returned HTTP {response.status_code}")
 
     def _parse_json(self, response: httpx.Response) -> object:
@@ -162,14 +200,61 @@ class PaperlessClient:
         except (TypeError, ValueError) as exc:
             raise PaperlessUnavailableError("Paperless returned malformed document payload") from exc
 
+    def exchange_password(self, username: str, password: str) -> str:
+        """POST /api/token/ — returns raw token string (without Token prefix)."""
+        url = f"{self._base_url}/api/token/"
+        response = self._request(
+            "POST",
+            url,
+            json={"username": username, "password": password},
+        )
+        if response.status_code in {400, 401, 403}:
+            raise PaperlessAuthError("Invalid Paperless credentials")
+        self._raise_for_status(response)
+        payload = self._parse_json(response)
+        if not isinstance(payload, dict) or not isinstance(payload.get("token"), str):
+            raise PaperlessUnavailableError("Paperless token response malformed")
+        token = payload["token"].strip()
+        if not token:
+            raise PaperlessUnavailableError("Paperless token response empty")
+        return token
+
     def get_document(self, document_id: int, token: str) -> PaperlessDocument:
         url = f"{self._base_url}/api/documents/{document_id}/"
         response = self._request("GET", url, token)
         self._raise_for_status(response, document_id)
         return self._document_from_payload(self._parse_json(response), token)
 
-    def list_documents(self, token: str, *, page: int = 1, page_size: int = 25) -> PaperlessDocumentPage:
-        url = f"{self._base_url}/api/documents/?page={page}&page_size={page_size}"
+    def list_documents(
+        self,
+        token: str,
+        *,
+        page: int = 1,
+        page_size: int = 25,
+        query: str | None = None,
+        ordering: str | None = None,
+        created_gte: str | None = None,
+        created_lte: str | None = None,
+        correspondent: str | None = None,
+        document_type: str | None = None,
+        tag: str | None = None,
+    ) -> PaperlessDocumentPage:
+        params: dict[str, str | int] = {"page": page, "page_size": page_size}
+        if query:
+            params["query"] = query
+        if ordering:
+            params["ordering"] = ordering
+        if created_gte:
+            params["created__date__gte"] = created_gte
+        if created_lte:
+            params["created__date__lte"] = created_lte
+        if correspondent:
+            params["correspondent__name__icontains"] = correspondent
+        if document_type:
+            params["document_type__name__icontains"] = document_type
+        if tag:
+            params["tags__name__icontains"] = tag
+        url = f"{self._base_url}/api/documents/?{urlencode(params)}"
         response = self._request("GET", url, token)
         self._raise_for_status(response)
         payload = self._parse_json(response)
@@ -195,6 +280,68 @@ class PaperlessClient:
             raise PaperlessUnavailableError("Paperless returned malformed document list") from exc
         except PaperlessUnavailableError:
             raise
+
+    def post_document(
+        self,
+        token: str,
+        *,
+        filename: str,
+        content: bytes | BinaryIO,
+        content_type: str = "application/octet-stream",
+    ) -> str:
+        """Upload via POST /api/documents/post_document/; return Paperless task id."""
+        url = f"{self._base_url}/api/documents/post_document/"
+        files = {"document": (filename, content, content_type)}
+        response = self._request("POST", url, token, files=files)
+        self._raise_for_status(response)
+        # Paperless may return a bare UUID string or JSON.
+        text = (response.text or "").strip().strip('"')
+        if text and "\n" not in text and len(text) < 80 and "{" not in text:
+            return text
+        payload = self._parse_json(response)
+        if isinstance(payload, str) and payload.strip():
+            return payload.strip()
+        if isinstance(payload, dict):
+            for key in ("task_id", "id", "task"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        raise PaperlessUnavailableError("Paperless post_document response missing task id")
+
+    def get_task(self, task_id: str, token: str) -> PaperlessTaskStatus:
+        url = f"{self._base_url}/api/tasks/?{urlencode({'task_id': task_id})}"
+        response = self._request("GET", url, token)
+        self._raise_for_status(response)
+        payload = self._parse_json(response)
+        rows: list[object]
+        if isinstance(payload, list):
+            rows = payload
+        elif isinstance(payload, dict) and isinstance(payload.get("results"), list):
+            rows = payload["results"]
+        else:
+            raise PaperlessUnavailableError("Paperless tasks response malformed")
+        if not rows:
+            return PaperlessTaskStatus(task_id=task_id, status="PENDING")
+        row = rows[0]
+        if not isinstance(row, dict):
+            raise PaperlessUnavailableError("Paperless task row malformed")
+        status = str(row.get("status") or row.get("state") or "PENDING").upper()
+        related = row.get("related_document")
+        related_id: int | None = None
+        if isinstance(related, int):
+            related_id = related
+        elif isinstance(related, str) and related.isdigit():
+            related_id = int(related)
+        result = row.get("result")
+        result_text = result if isinstance(result, str) else None
+        if related_id is None and result_text and result_text.isdigit():
+            related_id = int(result_text)
+        return PaperlessTaskStatus(
+            task_id=task_id,
+            status=status,
+            related_document_id=related_id,
+            result=result_text,
+        )
 
     def document_exists(self, document_id: int, token: str) -> bool:
         self.get_document(document_id, token=token)

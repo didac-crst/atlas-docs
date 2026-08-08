@@ -4,27 +4,18 @@ Forward-looking milestones and explicitly deferred work. Implemented behavior
 is documented in [architecture.md](architecture.md) and related canonical docs.
 Historical milestone plans live under [archive/](archive/).
 
-## Current baseline (v0.4)
+## Current baseline (v0.5)
 
-- Entity + ExternalReference core (v0.3 schema)
-- Entity relationship API and document facade
+- Entity + ExternalReference core; entity relationship API and document facade
 - Deterministic Paperless reconciliation without auto-delete
-- React + TypeScript + Vite classification workbench with BFF session/CSRF
+- React workbench with home, classify (search/filter/bulk), ingest, reconcile
+- Password login → server-side token; PostgreSQL sessions; encrypted job tokens
+- Durable async ingestion worker (`atlasdocs worker ingest`)
 
-## Next (v0.5)
-
-Specification (design only until implemented):
-[v0.5 ingestion & classification spec](v0.5-ingestion-classification-spec.md)
-· security decisions [ADR 0002](adr/0002-v05-session-ingest-security.md).
-
-Planned themes:
-
-- Paperless username/password → server-side token exchange
-- Durable PostgreSQL sessions + asynchronous ingestion jobs
-- Searchable / filterable classification workbench and bulk assignment
-- Task-oriented home navigation
-
-Do not treat unchecked implementation PRs as shipped.
+Design contracts:
+[v0.5 ingestion & classification](v0.5-ingestion-classification-spec.md)
+· [ADR 0002](adr/0002-v05-session-ingest-security.md)
+· [v0.5 product UX refinement](v0.5-product-ux-refinement.md) (home summaries, entity autocomplete, document header).
 
 ## Explicitly deferred
 

@@ -30,14 +30,21 @@ npm run test:e2e
 docker compose up --build
 ```
 
-Open the workbench at `http://localhost:8080/ui` and paste a Paperless API
-token. The token is stored server-side; the browser only keeps an opaque
-HttpOnly session cookie.
+Open the workbench at `http://localhost:8080/ui` and sign in with a Paperless
+username/password (or use advanced token paste in development). Credentials
+stay server-side; the browser only keeps an opaque HttpOnly session cookie.
+Compose also starts `worker` for durable ingestion jobs.
 
-API-only reload during UI work:
+API-only reload during UI work. Run these commands in separate terminals:
 
 ```bash
+# Terminal 1
 uvicorn atlasdocs.main:app --reload --port 8080
+
+# Terminal 2
+atlasdocs worker ingest   # separate process for uploads
+
+# Terminal 3
 cd frontend && npm run dev   # proxies /ui/api to :8080
 ```
 
@@ -55,13 +62,19 @@ cd frontend && npm run dev   # proxies /ui/api to :8080
 | `PAPERLESS_TIMEOUT_SECONDS` | Upstream timeout |
 | `ATLASDOCS_ENV` | **Required.** `development` or `production` (no silent default) |
 | `SESSION_SECRET` | Required non-default secret in production |
+| `TOKEN_ENCRYPTION_KEY` | Encrypts durable session + job tokens (required non-default in production; ADR 0002) |
 | `SESSION_SECURE` | Set cookie `Secure` (required true in production) |
 | `SESSION_MAX_AGE_SECONDS` | Server-side session expiry (default 8 hours) |
+| `INGEST_MAX_UPLOAD_BYTES` | Upload size cap (default 50 MiB) |
+| `INGEST_MAX_ATTEMPTS` | Upload retry budget (default 3) |
+| `INGEST_PROCESSING_TIMEOUT_SECONDS` | Max PROCESSING duration (default 1800) |
+| `INGEST_BULK_MAX_DOCUMENTS` | Bulk assign cap (default 50) |
 | `SEED_PATH` | Seed YAML path |
 
-The SQLAlchemy URL is built at runtime with `URL.create()` from the split
-`DATABASE_*` settings so passwords with special characters are escaped safely.
-Production rejects the default `DATABASE_PASSWORD` and default `SESSION_SECRET`.
+See `.env.example`. The SQLAlchemy URL is built at runtime with `URL.create()`
+from the split `DATABASE_*` settings so passwords with special characters are
+escaped safely. Production rejects default `DATABASE_PASSWORD`,
+`SESSION_SECRET`, and `TOKEN_ENCRYPTION_KEY`.
 
 `ATLASDOCS_ENV` must be set explicitly. Omitting it fails startup.
 

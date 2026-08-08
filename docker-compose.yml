@@ -33,11 +33,37 @@ services:
       # PAPERLESS_PUBLIC_URL: http://localhost:8000
       ATLASDOCS_ENV: development
       SESSION_SECRET: dev-only-change-me
+      TOKEN_ENCRYPTION_KEY: dev-only-token-encryption-key
       SESSION_SECURE: "false"
       SEED_PATH: /app/config/seed/v0.1.yaml
+    volumes:
+      - atlasdocs_ingest_spool:/tmp/atlasdocs-ingest
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: ["atlasdocs", "worker", "ingest"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: atlasdocs
+      DATABASE_USER: atlasdocs
+      DATABASE_PASSWORD: atlasdocs
+      PAPERLESS_BASE_URL: http://host.docker.internal:8000
+      ATLASDOCS_ENV: development
+      SESSION_SECRET: dev-only-change-me
+      TOKEN_ENCRYPTION_KEY: dev-only-token-encryption-key
+      SESSION_SECURE: "false"
+    volumes:
+      - atlasdocs_ingest_spool:/tmp/atlasdocs-ingest
     depends_on:
       db:
         condition: service_healthy
 
 volumes:
   atlasdocs_pg:
+  atlasdocs_ingest_spool:

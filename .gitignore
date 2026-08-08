@@ -4,6 +4,9 @@
 *.swp
 *~
 .venv/
+.nvm/
+.docker-data/
+.docker-run/
 __pycache__/
 *.py[cod]
 .pytest_cache/

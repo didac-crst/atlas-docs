@@ -5,16 +5,37 @@ from __future__ import annotations
 import secrets
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from atlasdocs.api.routes import get_paperless_client
 from atlasdocs.api.schemas import (
+    BulkRelationshipResultResponse,
+    BulkRelationshipsRequest,
+    BulkRelationshipsResponse,
     ConceptResponse,
     CreateRelationshipRequest,
     DocumentResponse,
+    EntitySearchHitResponse,
+    HomeSummaryResponse,
+    CountStatResponse,
+    RecentDocumentResponse,
+    RecentKnowledgeResponse,
+    IngestionJobResponse,
+    IngestionJobsResponse,
     ReconcileRequest,
     ReconcileResponse,
     RelationshipResponse,
@@ -33,12 +54,15 @@ from atlasdocs.services.documents import (
     UpstreamError,
     ValidationError,
 )
-from atlasdocs.services.paperless import PaperlessClient
+from atlasdocs.services.home import HomeService
+from atlasdocs.services.ingest import DuplicateIngestError, IngestionService
+from atlasdocs.services.login_rate_limit import login_rate_limiter
+from atlasdocs.services.paperless import PaperlessAuthError, PaperlessClient, PaperlessError
 from atlasdocs.services.reconcile import ReconcileService
 from atlasdocs.ui.sessions import (
+    DbSessionStore,
     ensure_session,
     get_request_session,
-    session_store,
     set_session_cookie,
 )
 
@@ -61,6 +85,12 @@ class ConnectRequest(BaseModel):
     csrf_token: str = Field(..., min_length=1)
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+    csrf_token: str = Field(..., min_length=1)
+
+
 class DisconnectRequest(BaseModel):
     csrf_token: str = Field(..., min_length=1)
 
@@ -79,6 +109,20 @@ def get_ui_reconcile_service(
     return ReconcileService(session, paperless)
 
 
+def get_ui_ingest_service(
+    session: Session = Depends(get_db),
+    paperless: PaperlessClient = Depends(get_paperless_client),
+) -> IngestionService:
+    return IngestionService(session, paperless)
+
+
+def get_ui_home_service(
+    session: Session = Depends(get_db),
+    paperless: PaperlessClient = Depends(get_paperless_client),
+) -> HomeService:
+    return HomeService(session, paperless)
+
+
 def _validate_csrf(session_csrf: str, csrf_token: str | None) -> bool:
     if not session_csrf or csrf_token is None:
         return False
@@ -91,13 +135,6 @@ def _validate_csrf(session_csrf: str, csrf_token: str | None) -> bool:
         return False
 
 
-def _csrf_from_request(
-    csrf_token: str | None = None,
-    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
-) -> str | None:
-    return x_csrf_token or csrf_token
-
-
 def _to_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, UnauthorizedError):
         return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
@@ -105,6 +142,11 @@ def _to_http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, ForbiddenDocumentError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    if isinstance(exc, DuplicateIngestError):
+        detail = str(exc)
+        if exc.paperless_document_id is not None:
+            detail = f"{detail}; paperless_document_id={exc.paperless_document_id}"
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
     if isinstance(exc, ConflictError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, ValidationError):
@@ -124,8 +166,8 @@ _DOMAIN_ERRORS = (
 )
 
 
-def _require_ui_auth(request: Request) -> tuple:
-    ui_session = get_request_session(request)
+def _require_ui_auth(request: Request, db: Session) -> tuple:
+    ui_session = get_request_session(request, db)
     if ui_session is None or not ui_session.authenticated:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return ui_session, ui_session.paperless_authorization or ""
@@ -156,6 +198,21 @@ def _serialize_document(document) -> DocumentResponse:
     )
 
 
+def _serialize_job(job) -> IngestionJobResponse:
+    return IngestionJobResponse(
+        id=job.id,
+        state=job.state,
+        created_at=job.created_at.isoformat(),
+        updated_at=job.updated_at.isoformat(),
+        paperless_document_id=job.paperless_document_id,
+        paperless_task_id=job.paperless_task_id,
+        error_code=job.error_code,
+        error_message=job.error_message,
+        original_filename=job.original_filename,
+        content_sha256=job.content_sha256,
+    )
+
+
 def _json_with_session(payload: dict | BaseModel, ui_session, status_code: int = 200) -> JSONResponse:
     body = payload.model_dump() if isinstance(payload, BaseModel) else payload
     response = JSONResponse(content=body, status_code=status_code)
@@ -163,9 +220,17 @@ def _json_with_session(payload: dict | BaseModel, ui_session, status_code: int =
     return response
 
 
+def _client_ip(request: Request) -> str:
+    # Do not trust X-Forwarded-For from the client; rate limits must use the
+    # direct peer address unless a trusted reverse proxy strips/rewrites it.
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
 @api_router.get("/session", response_model=SessionResponse)
-def get_session(request: Request) -> JSONResponse:
-    ui_session = ensure_session(request)
+def get_session(request: Request, db: Session = Depends(get_db)) -> JSONResponse:
+    ui_session = ensure_session(request, db)
     return _json_with_session(
         SessionResponse(
             authenticated=ui_session.authenticated,
@@ -175,9 +240,61 @@ def get_session(request: Request) -> JSONResponse:
     )
 
 
+@api_router.post("/login", response_model=SessionResponse)
+def login(
+    request: Request,
+    payload: LoginRequest,
+    db: Session = Depends(get_db),
+    paperless: PaperlessClient = Depends(get_paperless_client),
+) -> JSONResponse:
+    store = DbSessionStore(db)
+    ui_session = ensure_session(request, db)
+    if not _validate_csrf(ui_session.csrf_token, payload.csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+
+    client_ip = _client_ip(request)
+    username = payload.username.strip()
+    if not login_rate_limiter.check(client_ip=client_ip, username=username):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many attempts",
+            headers={"Retry-After": "600"},
+        )
+
+    try:
+        raw_token = paperless.exchange_password(username, payload.password)
+    except PaperlessAuthError:
+        login_rate_limiter.record_failure(client_ip=client_ip, username=username)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed",
+        ) from None
+    except PaperlessError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authentication upstream error",
+        ) from None
+
+    authorization = f"Token {raw_token}"
+    store.delete(ui_session.id)
+    ui_session = store.create(
+        paperless_authorization=authorization,
+        username_label=username,
+    )
+    return _json_with_session(
+        SessionResponse(authenticated=True, csrf_token=ui_session.csrf_token),
+        ui_session,
+    )
+
+
 @api_router.post("/connect", response_model=SessionResponse)
-def connect(request: Request, payload: ConnectRequest) -> JSONResponse:
-    ui_session = ensure_session(request)
+def connect(
+    request: Request,
+    payload: ConnectRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    store = DbSessionStore(db)
+    ui_session = ensure_session(request, db)
     if not _validate_csrf(ui_session.csrf_token, payload.csrf_token):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
 
@@ -187,8 +304,8 @@ def connect(request: Request, payload: ConnectRequest) -> JSONResponse:
     if not token.lower().startswith("token ") and not token.lower().startswith("bearer "):
         token = f"Token {token}"
 
-    session_store.delete(ui_session.id)
-    ui_session = session_store.create(paperless_authorization=token)
+    store.delete(ui_session.id)
+    ui_session = store.create(paperless_authorization=token)
     return _json_with_session(
         SessionResponse(authenticated=True, csrf_token=ui_session.csrf_token),
         ui_session,
@@ -196,34 +313,150 @@ def connect(request: Request, payload: ConnectRequest) -> JSONResponse:
 
 
 @api_router.post("/disconnect", response_model=SessionResponse)
-def disconnect(request: Request, payload: DisconnectRequest) -> Response:
-    ui_session = get_request_session(request)
+def disconnect(
+    request: Request,
+    payload: DisconnectRequest,
+    db: Session = Depends(get_db),
+) -> Response:
+    store = DbSessionStore(db)
+    ui_session = get_request_session(request, db)
     if ui_session is not None and _validate_csrf(ui_session.csrf_token, payload.csrf_token):
-        session_store.delete(ui_session.id)
-    fresh = session_store.create()
-    # _json_with_session sets the replacement cookie; no clear/set dance needed.
+        store.delete(ui_session.id)
+    fresh = store.create()
     return _json_with_session(
         SessionResponse(authenticated=False, csrf_token=fresh.csrf_token),
         fresh,
     )
 
 
-@api_router.get("/documents", response_model=UnclassifiedPageResponse)
-def list_unclassified(
+@api_router.get("/home", response_model=HomeSummaryResponse)
+def get_home_summary(
     request: Request,
-    unclassified: bool = Query(default=True),
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=UNCLASSIFIED_PAGE_SIZE, ge=1, le=UNCLASSIFIED_PAGE_SIZE),
+    db: Session = Depends(get_db),
+    service: HomeService = Depends(get_ui_home_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    try:
+        summary = service.summarize(auth)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    body = HomeSummaryResponse(
+        needs_classification=CountStatResponse(
+            count=summary.needs_classification.count,
+            capped=summary.needs_classification.capped,
+            unavailable=summary.needs_classification.unavailable,
+        ),
+        needs_review=CountStatResponse(
+            count=summary.needs_review.count,
+            capped=summary.needs_review.capped,
+            unavailable=summary.needs_review.unavailable,
+        ),
+        failed_ingestion=CountStatResponse(
+            count=summary.failed_ingestion.count,
+            capped=summary.failed_ingestion.capped,
+            unavailable=summary.failed_ingestion.unavailable,
+        ),
+        reconciliation_issues=CountStatResponse(
+            count=summary.reconciliation_issues.count,
+            capped=summary.reconciliation_issues.capped,
+            unavailable=summary.reconciliation_issues.unavailable,
+        ),
+        recent_documents=[
+            RecentDocumentResponse(
+                label=item.label,
+                entity_id=item.entity_id,
+                href=item.href,
+                created_date=item.created_date,
+            )
+            for item in summary.recent_documents
+        ],
+        recent_knowledge=[
+            RecentKnowledgeResponse(
+                label=item.label,
+                relationship_type=item.relationship_type,
+                href=item.href,
+            )
+            for item in summary.recent_knowledge
+        ],
+    )
+    return _json_with_session(body, ui_session)
+
+
+@api_router.get("/entities/search", response_model=list[EntitySearchHitResponse])
+def search_entities(
+    request: Request,
+    q: str = Query(default=""),
+    entity_type: str | None = Query(default=None),
+    ontology: str | None = Query(default=None),
+    db: Session = Depends(get_db),
     service: DocumentService = Depends(get_ui_service),
 ) -> JSONResponse:
-    ui_session, auth = _require_ui_auth(request)
-    if not unclassified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only unclassified=true listing is supported",
-        )
+    ui_session, auth = _require_ui_auth(request, db)
     try:
-        result = service.list_unclassified(auth, page=page, page_size=page_size)
+        hits = service.search_entities(
+            auth, q=q, entity_type=entity_type, ontology_code=ontology
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    payload = [
+        EntitySearchHitResponse(
+            id=item.id,
+            label=item.label,
+            entity_type=item.entity_type,
+            paperless_document_id=item.paperless_document_id,
+            subtitle=item.subtitle,
+            open_url=item.open_url,
+        )
+        for item in hits
+    ]
+    response = JSONResponse(content=[item.model_dump() for item in payload])
+    set_session_cookie(response, ui_session)
+    return response
+
+
+@api_router.get("/documents", response_model=UnclassifiedPageResponse)
+def list_documents(
+    request: Request,
+    unclassified: bool | None = Query(default=None),
+    classification: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc"),
+    created_gte: str | None = Query(default=None),
+    created_lte: str | None = Query(default=None),
+    correspondent: str | None = Query(default=None),
+    document_type: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    completeness: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=UNCLASSIFIED_PAGE_SIZE, ge=1, le=UNCLASSIFIED_PAGE_SIZE),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    if classification is None:
+        if unclassified is False:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="classification or unclassified=true required",
+            )
+        classification = "unclassified" if unclassified in (None, True) else "any"
+    try:
+        result = service.list_documents(
+            auth,
+            page=page,
+            page_size=page_size,
+            q=q,
+            classification=classification,
+            sort=sort,
+            order=order,
+            created_gte=created_gte,
+            created_lte=created_lte,
+            correspondent=correspondent,
+            document_type=document_type,
+            tag=tag,
+            completeness=completeness,
+        )
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
     payload = UnclassifiedPageResponse(
@@ -247,13 +480,54 @@ def list_unclassified(
     return _json_with_session(payload, ui_session)
 
 
+@api_router.post("/documents/bulk-relationships", response_model=BulkRelationshipsResponse)
+def bulk_relationships(
+    request: Request,
+    payload: BulkRelationshipsRequest,
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    csrf = x_csrf_token or payload.csrf_token
+    if not _validate_csrf(ui_session.csrf_token, csrf):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        results = service.bulk_add_relationships(
+            payload.paperless_document_ids,
+            payload.relationship,
+            token=auth,
+            target=payload.target,
+            target_entity_id=payload.target_entity_id,
+            target_paperless_id=payload.target_paperless_id,
+            strict=payload.strict,
+        )
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    body = BulkRelationshipsResponse(
+        results=[
+            BulkRelationshipResultResponse(
+                paperless_document_id=item.paperless_document_id,
+                status=item.status,
+                relationship_id=item.relationship_id,
+            )
+            for item in results
+        ]
+    )
+    return _json_with_session(body, ui_session)
+
+
 @api_router.get("/documents/{paperless_document_id}", response_model=DocumentResponse)
 def get_document(
     request: Request,
     paperless_document_id: int,
+    db: Session = Depends(get_db),
     service: DocumentService = Depends(get_ui_service),
 ) -> JSONResponse:
-    ui_session, auth = _require_ui_auth(request)
+    ui_session, auth = _require_ui_auth(request, db)
     try:
         document = service.get_document(paperless_document_id, token=auth)
     except _DOMAIN_ERRORS as exc:
@@ -271,9 +545,10 @@ def create_document_relationship(
     paperless_document_id: int,
     payload: CreateRelationshipRequest,
     x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
     service: DocumentService = Depends(get_ui_service),
 ) -> JSONResponse:
-    ui_session, auth = _require_ui_auth(request)
+    ui_session, auth = _require_ui_auth(request, db)
     if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
 
@@ -297,7 +572,8 @@ def create_document_relationship(
             target_entity_id=payload.target_entity_id,
             target_paperless_id=payload.target_paperless_id,
         )
-        if not session_store.rotate_csrf(ui_session):
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
@@ -310,14 +586,16 @@ def delete_relationship(
     request: Request,
     relationship_id: str,
     x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
     service: DocumentService = Depends(get_ui_service),
 ) -> Response:
-    ui_session, auth = _require_ui_auth(request)
+    ui_session, auth = _require_ui_auth(request, db)
     if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
     try:
         service.delete_relationship(relationship_id, token=auth)
-        if not session_store.rotate_csrf(ui_session):
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
@@ -329,9 +607,10 @@ def delete_relationship(
 @api_router.get("/relationship-types", response_model=list[RelationshipTypeResponse])
 def list_relationship_types(
     request: Request,
+    db: Session = Depends(get_db),
     service: DocumentService = Depends(get_ui_service),
 ) -> JSONResponse:
-    ui_session, auth = _require_ui_auth(request)
+    ui_session, auth = _require_ui_auth(request, db)
     try:
         rows = service.list_relationship_types(auth)
     except _DOMAIN_ERRORS as exc:
@@ -356,9 +635,10 @@ def search_concepts(
     request: Request,
     q: str = Query(default=""),
     ontology: str | None = Query(default=None),
+    db: Session = Depends(get_db),
     service: DocumentService = Depends(get_ui_service),
 ) -> JSONResponse:
-    ui_session, auth = _require_ui_auth(request)
+    ui_session, auth = _require_ui_auth(request, db)
     try:
         concepts = service.search_concepts(q=q, ontology_code=ontology, token=auth)
     except _DOMAIN_ERRORS as exc:
@@ -369,19 +649,76 @@ def search_concepts(
     return response
 
 
+@api_router.post("/ingest", response_model=IngestionJobResponse, status_code=status.HTTP_202_ACCEPTED)
+def ingest_upload(
+    request: Request,
+    document: UploadFile = File(...),
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: IngestionService = Depends(get_ui_ingest_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        job = service.enqueue(
+            authorization=auth,
+            filename=document.filename or "upload.bin",
+            file_obj=document.file,
+            content_type=document.content_type or "application/octet-stream",
+            session_id=ui_session.id,
+            created_by_label=ui_session.username_label,
+        )
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_job(job), ui_session, status_code=202)
+
+
+@api_router.get("/ingest/jobs", response_model=IngestionJobsResponse)
+def list_ingest_jobs(
+    request: Request,
+    db: Session = Depends(get_db),
+    service: IngestionService = Depends(get_ui_ingest_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    jobs = service.list_jobs(auth)
+    body = IngestionJobsResponse(items=[_serialize_job(job) for job in jobs])
+    return _json_with_session(body, ui_session)
+
+
+@api_router.get("/ingest/jobs/{job_id}", response_model=IngestionJobResponse)
+def get_ingest_job(
+    request: Request,
+    job_id: str,
+    db: Session = Depends(get_db),
+    service: IngestionService = Depends(get_ui_ingest_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    try:
+        job = service.get_job(job_id, auth)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_job(job), ui_session)
+
+
 @api_router.post("/reconcile", response_model=ReconcileResponse)
 def reconcile(
     request: Request,
     payload: ReconcileRequest,
     x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
     service: ReconcileService = Depends(get_ui_reconcile_service),
 ) -> JSONResponse:
-    ui_session, auth = _require_ui_auth(request)
+    ui_session, auth = _require_ui_auth(request, db)
     if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
     try:
         summary = service.reconcile(auth, dry_run=payload.dry_run, limit=payload.limit)
-        if not session_store.rotate_csrf(ui_session):
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
@@ -421,6 +758,8 @@ def spa_root() -> Response:
 
 @router.get("/connect")
 @router.get("/reconcile")
+@router.get("/classify")
+@router.get("/ingest")
 @router.get("/documents/{paperless_document_id}")
 def spa_client_routes(paperless_document_id: int | None = None) -> Response:
     _ = paperless_document_id

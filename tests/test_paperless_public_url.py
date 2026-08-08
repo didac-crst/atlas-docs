@@ -18,7 +18,6 @@ from atlasdocs.db.models import Base
 from atlasdocs.db.seed import seed_from_path
 from atlasdocs.db.session import get_db, get_engine, get_session_factory, reset_engine
 from atlasdocs.services.paperless import PaperlessClient
-from atlasdocs.ui.sessions import session_store
 from tests.fakes import FakePaperlessTransport
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "config" / "seed" / "v0.1.yaml"
@@ -82,6 +81,7 @@ def _client_with_env(
 ) -> Iterator[TestClient]:
     get_settings.cache_clear()
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "test-token-encryption-key")
     monkeypatch.setenv("ATLASDOCS_ENV", "development")
     monkeypatch.setenv("SESSION_SECURE", "false")
     monkeypatch.setenv("PAPERLESS_BASE_URL", "http://host.docker.internal:8000")
@@ -90,7 +90,6 @@ def _client_with_env(
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     get_settings.cache_clear()
-    session_store.clear()
     reset_engine()
 
     engine = get_engine(f"sqlite+pysqlite:///{tmp_path / 'atlasdocs.db'}")
@@ -126,7 +125,6 @@ def _client_with_env(
             yield client
         finally:
             app.dependency_overrides.clear()
-            session_store.clear()
             reset_engine()
             get_settings.cache_clear()
 

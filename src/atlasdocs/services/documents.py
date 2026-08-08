@@ -132,6 +132,23 @@ class ConceptView:
     name: str
 
 
+@dataclass(frozen=True)
+class BulkRelationshipResult:
+    paperless_document_id: int
+    status: str
+    relationship_id: str | None = None
+
+
+@dataclass(frozen=True)
+class EntitySearchHit:
+    label: str
+    entity_type: str
+    id: str | None = None
+    paperless_document_id: int | None = None
+    subtitle: str | None = None
+    open_url: str | None = None
+
+
 class DocumentService:
     """Document facade and general entity relationship operations."""
 
@@ -703,6 +720,335 @@ class DocumentService:
             has_previous=page > 1,
             next_page=(last_page_fetched + 1) if has_next else None,
         )
+
+    def list_documents(
+        self,
+        token: str | None = None,
+        *,
+        page: int = 1,
+        page_size: int | None = None,
+        q: str | None = None,
+        classification: str = "unclassified",
+        sort: str | None = None,
+        order: str = "desc",
+        created_gte: str | None = None,
+        created_lte: str | None = None,
+        correspondent: str | None = None,
+        document_type: str | None = None,
+        tag: str | None = None,
+        completeness: str | None = None,
+    ) -> UnclassifiedPage:
+        """List documents with Paperless metadata filters + AtlasDocs classification."""
+        auth = self._require_token(token)
+        classification = (classification or "unclassified").strip().lower()
+        if classification not in {"unclassified", "classified", "any"}:
+            raise ValidationError("classification must be unclassified, classified, or any")
+        completeness_norm = (completeness or "").strip().lower() or None
+        if completeness_norm is not None and completeness_norm not in {
+            "empty",
+            "partial",
+            "complete",
+            "any",
+        }:
+            raise ValidationError("completeness must be empty, partial, complete, or any")
+        if completeness_norm == "empty":
+            classification = "unclassified"
+        elif completeness_norm == "complete":
+            classification = "classified"
+        if page < 1:
+            raise ValidationError("page must be >= 1")
+        size = page_size or self._settings.unclassified_page_size or UNCLASSIFIED_PAGE_SIZE
+        if size < 1 or size > UNCLASSIFIED_PAGE_SIZE:
+            raise ValidationError(f"page_size must be between 1 and {UNCLASSIFIED_PAGE_SIZE}")
+        order_norm = (order or "desc").strip().lower()
+        if order_norm not in {"asc", "desc"}:
+            raise ValidationError("order must be asc or desc")
+        sort_norm = (sort or "created").strip().lower()
+        if sort_norm not in {"created", "title", "id", "correspondent", "added"}:
+            raise ValidationError("sort must be created, title, id, correspondent, or added")
+        ordering_field = {
+            "created": "created",
+            "added": "added",
+            "title": "title",
+            "id": "id",
+            "correspondent": "correspondent__name",
+        }[sort_norm]
+        ordering = f"-{ordering_field}" if order_norm == "desc" else ordering_field
+        query = q.strip() if q else None
+        created_gte = created_gte.strip() if created_gte else None
+        created_lte = created_lte.strip() if created_lte else None
+        correspondent = correspondent.strip() if correspondent else None
+        document_type = document_type.strip() if document_type else None
+        tag = tag.strip() if tag else None
+        has_paperless_filters = any(
+            [query, created_gte, created_lte, correspondent, document_type, tag]
+        )
+
+        if (
+            classification == "unclassified"
+            and not has_paperless_filters
+            and order_norm == "desc"
+            and sort_norm in {"created", "id"}
+        ):
+            # Preserve v0.4 fill-across-pages behavior for the unclassified queue.
+            return self.list_unclassified(auth, page=page, page_size=size)
+
+        max_upstream = (
+            self._settings.unclassified_max_upstream_pages or UNCLASSIFIED_MAX_UPSTREAM_PAGES
+        )
+        items: list[UnclassifiedDocument] = []
+        paperless_count = 0
+        upstream_page = page
+        pages_fetched = 0
+        has_next = False
+        last_page_fetched = page
+
+        def _matches(doc_id: int, confirmed: set[int]) -> bool:
+            if completeness_norm == "partial":
+                # Suggested-only is rare; treat as classified-but-empty confirmed for now.
+                return doc_id not in confirmed
+            if classification == "any":
+                return True
+            if classification == "classified":
+                return doc_id in confirmed
+            return doc_id not in confirmed
+
+        try:
+            while len(items) < size and pages_fetched < max_upstream:
+                paperless_page = self._paperless.list_documents(
+                    auth,
+                    page=upstream_page,
+                    page_size=size,
+                    query=query,
+                    ordering=ordering,
+                    created_gte=created_gte,
+                    created_lte=created_lte,
+                    correspondent=correspondent,
+                    document_type=document_type,
+                    tag=tag,
+                )
+                pages_fetched += 1
+                last_page_fetched = upstream_page
+                paperless_count = paperless_page.count
+                ids = [doc.id for doc in paperless_page.results]
+                confirmed = self._confirmed_paperless_ids(ids)
+                for doc in paperless_page.results:
+                    if not _matches(doc.id, confirmed):
+                        continue
+                    items.append(
+                        UnclassifiedDocument(
+                            paperless_document_id=doc.id,
+                            title=doc.title,
+                            created_date=doc.created_date,
+                            correspondent=doc.correspondent,
+                            document_type=doc.document_type,
+                        )
+                    )
+                    if len(items) >= size:
+                        break
+
+                if classification == "any" and completeness_norm not in {"partial", "empty"}:
+                    has_next = paperless_page.has_next
+                    break
+
+                if len(items) >= size:
+                    has_next = paperless_page.has_next or len(paperless_page.results) == size
+                    break
+                if not paperless_page.has_next:
+                    has_next = False
+                    break
+                upstream_page += 1
+                has_next = True
+        except PaperlessAuthError as exc:
+            raise ForbiddenDocumentError(str(exc)) from exc
+        except PaperlessNotFoundError as exc:
+            raise NotFoundError(str(exc)) from exc
+        except PaperlessUnavailableError as exc:
+            raise UpstreamError(str(exc)) from exc
+        except PaperlessError as exc:
+            raise UpstreamError(str(exc)) from exc
+
+        return UnclassifiedPage(
+            items=items[:size],
+            page=page,
+            page_size=size,
+            paperless_count=paperless_count,
+            has_next=has_next,
+            has_previous=page > 1,
+            next_page=(last_page_fetched + 1) if has_next else None,
+        )
+
+    def search_entities(
+        self,
+        token: str | None = None,
+        *,
+        q: str = "",
+        entity_type: str | None = None,
+        ontology_code: str | None = None,
+        limit: int = 25,
+    ) -> list[EntitySearchHit]:
+        """Search AtlasDocs entities for relationship targets (authz-filtered)."""
+        auth = self._require_token(token)
+        self._validate_paperless_token(auth)
+        if limit < 1 or limit > 50:
+            raise ValidationError("limit must be between 1 and 50")
+        wanted = (entity_type or "any").strip().lower()
+        if wanted not in {"any", "document", "concept"}:
+            raise ValidationError("entity_type must be any, document, or concept")
+        needle = q.strip()
+        hits: list[EntitySearchHit] = []
+
+        if wanted in {"any", "concept"}:
+            query = select(Concept).options(
+                joinedload(Concept.ontology), joinedload(Concept.entity)
+            )
+            if ontology_code:
+                ontology = self._session.scalar(
+                    select(Ontology).where(Ontology.code == ontology_code)
+                )
+                if ontology is None:
+                    raise NotFoundError(f"Ontology '{ontology_code}' not found")
+                query = query.where(Concept.ontology_id == ontology.id)
+            if needle:
+                escaped = (
+                    needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                )
+                pattern = f"%{escaped}%"
+                query = query.where(
+                    or_(
+                        Concept.code.ilike(pattern, escape="\\"),
+                        Concept.name.ilike(pattern, escape="\\"),
+                    )
+                )
+            query = query.order_by(Concept.name).limit(limit)
+            for row in self._session.scalars(query).unique():
+                subtitle = row.ontology.code if row.ontology else None
+                hits.append(
+                    EntitySearchHit(
+                        id=str(row.id),
+                        label=row.name,
+                        entity_type="concept",
+                        subtitle=subtitle,
+                    )
+                )
+                if len(hits) >= limit:
+                    return hits[:limit]
+
+        if wanted in {"any", "document"} and len(hits) < limit:
+            remaining = limit - len(hits)
+            try:
+                page = self._paperless.list_documents(
+                    auth,
+                    page=1,
+                    page_size=remaining,
+                    query=needle or None,
+                    ordering="-created",
+                )
+            except PaperlessAuthError as exc:
+                raise ForbiddenDocumentError(str(exc)) from exc
+            except PaperlessUnavailableError as exc:
+                raise UpstreamError(str(exc)) from exc
+            except PaperlessError as exc:
+                raise UpstreamError(str(exc)) from exc
+            for doc in page.results:
+                # Do not create Atlas entities on search; assign creates on write.
+                ref = self._get_external_reference(doc.id)
+                meta = " · ".join(
+                    part
+                    for part in (doc.created_date, doc.correspondent, doc.document_type)
+                    if part
+                )
+                hits.append(
+                    EntitySearchHit(
+                        id=str(ref.entity_id) if ref is not None else None,
+                        label=doc.title or f"Document {doc.id}",
+                        entity_type="document",
+                        paperless_document_id=doc.id,
+                        subtitle=meta or None,
+                        open_url=self._settings.paperless_document_url(doc.id),
+                    )
+                )
+        return hits[:limit]
+
+    def bulk_add_relationships(
+        self,
+        paperless_document_ids: list[int],
+        relationship_code: str,
+        token: str | None = None,
+        *,
+        target: str | None = None,
+        target_entity_id: str | None = None,
+        target_paperless_id: int | None = None,
+        strict: bool = False,
+    ) -> list[BulkRelationshipResult]:
+        auth = self._require_token(token)
+        max_docs = self._settings.ingest_bulk_max_documents
+        if not paperless_document_ids:
+            raise ValidationError("paperless_document_ids must not be empty")
+        if len(paperless_document_ids) > max_docs:
+            raise ValidationError(f"At most {max_docs} documents per bulk request")
+        provided = sum(
+            1
+            for value in (target, target_entity_id, target_paperless_id)
+            if value is not None
+        )
+        if provided != 1:
+            raise ValidationError(
+                "Provide exactly one of target, target_entity_id, or target_paperless_id"
+            )
+
+        results: list[BulkRelationshipResult] = []
+        for doc_id in paperless_document_ids:
+            try:
+                self._ensure_paperless_access(doc_id, auth)
+                before = {
+                    item.id
+                    for item in self.get_document(doc_id, token=auth).relationships
+                }
+                document = self.add_document_relationship(
+                    doc_id,
+                    relationship_code,
+                    token=auth,
+                    target=target,
+                    target_entity_id=target_entity_id,
+                    target_paperless_id=target_paperless_id,
+                )
+                created_ids = [item.id for item in document.relationships if item.id not in before]
+                results.append(
+                    BulkRelationshipResult(
+                        paperless_document_id=doc_id,
+                        status="created",
+                        relationship_id=created_ids[0] if created_ids else None,
+                    )
+                )
+            except (ForbiddenDocumentError, NotFoundError):
+                results.append(
+                    BulkRelationshipResult(
+                        paperless_document_id=doc_id,
+                        status="forbidden_or_missing",
+                    )
+                )
+                if strict:
+                    break
+            except ConflictError:
+                results.append(
+                    BulkRelationshipResult(
+                        paperless_document_id=doc_id,
+                        status="skipped_duplicate",
+                    )
+                )
+                if strict:
+                    break
+            except ValidationError:
+                results.append(
+                    BulkRelationshipResult(
+                        paperless_document_id=doc_id,
+                        status="validation_error",
+                    )
+                )
+                if strict:
+                    break
+        return results
 
     def search_concepts(
         self,

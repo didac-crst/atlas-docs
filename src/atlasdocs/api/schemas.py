@@ -67,6 +67,80 @@ class UnclassifiedPageResponse(BaseModel):
     next_page: int | None = None
 
 
+class BulkRelationshipsRequest(BaseModel):
+    paperless_document_ids: list[int] = Field(..., min_length=1)
+    relationship: str = Field(..., min_length=1)
+    target: str | None = Field(default=None, min_length=1)
+    target_entity_id: str | None = Field(default=None, min_length=1)
+    target_paperless_id: int | None = None
+    strict: bool = False
+    csrf_token: str | None = None
+
+
+class BulkRelationshipResultResponse(BaseModel):
+    paperless_document_id: int
+    status: str
+    relationship_id: str | None = None
+
+
+class BulkRelationshipsResponse(BaseModel):
+    results: list[BulkRelationshipResultResponse]
+
+
+class IngestionJobResponse(BaseModel):
+    id: str
+    state: str
+    created_at: str
+    updated_at: str
+    paperless_document_id: int | None = None
+    paperless_task_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    original_filename: str | None = None
+    content_sha256: str | None = None
+
+
+class IngestionJobsResponse(BaseModel):
+    items: list[IngestionJobResponse]
+
+
+class CountStatResponse(BaseModel):
+    count: int
+    capped: bool = False
+    unavailable: bool = False
+
+
+class RecentDocumentResponse(BaseModel):
+    label: str
+    entity_id: str | None = None
+    href: str
+    created_date: str | None = None
+
+
+class RecentKnowledgeResponse(BaseModel):
+    label: str
+    relationship_type: str
+    href: str
+
+
+class HomeSummaryResponse(BaseModel):
+    needs_classification: CountStatResponse
+    needs_review: CountStatResponse
+    failed_ingestion: CountStatResponse
+    reconciliation_issues: CountStatResponse
+    recent_documents: list[RecentDocumentResponse]
+    recent_knowledge: list[RecentKnowledgeResponse]
+
+
+class EntitySearchHitResponse(BaseModel):
+    id: str | None = None
+    label: str
+    entity_type: str
+    paperless_document_id: int | None = None
+    subtitle: str | None = None
+    open_url: str | None = None
+
+
 class RelationshipTypeResponse(BaseModel):
     code: str
     name: str
