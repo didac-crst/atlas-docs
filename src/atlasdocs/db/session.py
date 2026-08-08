@@ -1,7 +1,7 @@
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, URL, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from atlasdocs.config import get_settings
@@ -10,12 +10,22 @@ _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
 
 
-def get_engine(url: str | None = None) -> Engine:
+def _as_url(url: str | URL) -> URL:
+    return make_url(url) if isinstance(url, str) else url
+
+
+def get_engine(url: str | URL | None = None) -> Engine:
     global _engine, _SessionLocal
-    database_url = url or get_settings().database_url
-    if _engine is None or (url is not None and str(_engine.url) != database_url):
+    database_url = _as_url(url) if url is not None else get_settings().sqlalchemy_url()
+
+    if _engine is not None and url is not None and str(_engine.url) != str(database_url):
+        _engine.dispose()
+        _engine = None
+        _SessionLocal = None
+
+    if _engine is None:
         connect_args = {}
-        if database_url.startswith("sqlite"):
+        if database_url.get_backend_name() == "sqlite":
             connect_args["check_same_thread"] = False
         _engine = create_engine(database_url, connect_args=connect_args)
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)

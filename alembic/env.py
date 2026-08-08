@@ -16,7 +16,8 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return get_settings().database_url
+    # render_as_string keeps password escaping correct for special characters
+    return get_settings().sqlalchemy_url().render_as_string(hide_password=False)
 
 
 def run_migrations_offline() -> None:

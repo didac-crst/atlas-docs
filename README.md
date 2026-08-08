@@ -52,11 +52,17 @@ Environment variables:
 
 | Variable | Meaning |
 | --- | --- |
-| `DATABASE_URL` | SQLAlchemy URL (default local Postgres) |
+| `DATABASE_HOST` | PostgreSQL host (default `db`) |
+| `DATABASE_PORT` | PostgreSQL port (default `5432`) |
+| `DATABASE_NAME` | Database name (default `atlasdocs`) |
+| `DATABASE_USER` | Database user (default `atlasdocs`) |
+| `DATABASE_PASSWORD` | Database password (default `atlasdocs`) |
 | `PAPERLESS_BASE_URL` | Paperless origin, no trailing path |
 | `PAPERLESS_TOKEN` | Optional default Paperless token |
 | `PAPERLESS_TIMEOUT_SECONDS` | Upstream timeout |
 | `SEED_PATH` | Seed YAML path |
+
+The SQLAlchemy URL is built at runtime with `URL.create()` from the split `DATABASE_*` settings so passwords with special characters are escaped safely. Production should not rely on a single `DATABASE_URL` with embedded credentials.
 
 Request `Authorization` headers are forwarded to Paperless. When Paperless denies access, AtlasDocs returns 404 and does not disclose document-derived semantics.
 
