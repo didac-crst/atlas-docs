@@ -11,6 +11,10 @@
     <p class="brand">AtlasDocs</p>
     <p class="tagline">Classify documents beside Paperless</p>
     {% if authenticated %}
+    <nav class="site-nav" aria-label="Workbench">
+      <a href="/ui">Classify</a>
+      <a href="/ui/reconcile">Reconcile</a>
+    </nav>
     <form class="disconnect" method="post" action="/ui/disconnect">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit">Disconnect</button>

@@ -16,9 +16,14 @@
         <a
           class="doc-link{% if selected_id == item.paperless_document_id %} is-selected{% endif %}"
           href="/ui/documents/{{ item.paperless_document_id }}?page={{ queue.page }}"
+          title="{{ item.title or '(untitled)' }}"
         >
           <span class="doc-title">{{ item.title or "(untitled)" }}</span>
-          <span class="doc-id">#{{ item.paperless_document_id }}</span>
+          <span class="doc-meta">
+            #{{ item.paperless_document_id }}
+            {% if item.created_date %} · {{ item.created_date }}{% endif %}
+            {% if item.correspondent %} · {{ item.correspondent }}{% endif %}
+          </span>
         </a>
       </li>
       {% endfor %}
@@ -59,11 +64,15 @@
     <div class="source paperless">
       <h3>Paperless</h3>
       <p class="meta">Document #{{ document.paperless_document_id }}</p>
+      {% if document.created_date %}<p class="meta">Date: {{ document.created_date }}</p>{% endif %}
+      {% if document.correspondent %}<p class="meta">Correspondent: {{ document.correspondent }}</p>{% endif %}
+      {% if document.document_type %}<p class="meta">Type: {{ document.document_type }}</p>{% endif %}
       <p><a class="external" href="{{ document.open_url }}" target="_blank" rel="noopener">Open in Paperless</a></p>
     </div>
 
     <div class="source atlasdocs">
       <h3>AtlasDocs</h3>
+      {% if document.entity_id %}<p class="meta">Entity {{ document.entity_id }}</p>{% endif %}
       {% if document.relationships %}
       <ul class="relationships">
         {% for rel in document.relationships %}
@@ -92,13 +101,23 @@
         <label for="relationship">Relationship</label>
         <select id="relationship" name="relationship" required>
           {% for rel_type in relationship_types %}
+          {% if rel_type.target_ontology %}
           <option
             value="{{ rel_type.code }}"
-            data-ontology="{{ rel_type.target_ontology or '*' }}"
+            data-ontology="{{ rel_type.target_ontology }}"
           >{{ rel_type.name }}</option>
+          {% endif %}
+          {% endfor %}
+          {% for rel_type in relationship_types %}
+          {% if not rel_type.target_ontology %}
+          <option
+            value="{{ rel_type.code }}"
+            data-ontology="*"
+          >{{ rel_type.name }}</option>
+          {% endif %}
           {% endfor %}
         </select>
-        <label for="target">Target</label>
+        <label for="target">Target concept</label>
         <select id="target" name="target" required></select>
         <button type="submit">Save relationship</button>
       </form>

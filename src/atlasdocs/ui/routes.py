@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request, Response
@@ -25,6 +26,7 @@ from atlasdocs.services.documents import (
     ValidationError,
 )
 from atlasdocs.services.paperless import PaperlessClient
+from atlasdocs.services.reconcile import ReconcileService
 from atlasdocs.ui.sessions import (
     clear_session_cookie,
     ensure_session,
@@ -43,6 +45,13 @@ def get_ui_service(
     paperless: PaperlessClient = Depends(get_paperless_client),
 ) -> DocumentService:
     return DocumentService(session, paperless)
+
+
+def get_ui_reconcile_service(
+    session: Session = Depends(get_db),
+    paperless: PaperlessClient = Depends(get_paperless_client),
+) -> ReconcileService:
+    return ReconcileService(session, paperless)
 
 
 def _validate_csrf(session_csrf: str, csrf_token: str) -> bool:
@@ -306,5 +315,93 @@ def delete_relationship_form(
         notice = _error_message(exc)
 
     response = _redirect_notice(paperless_document_id, page, notice)
+    set_session_cookie(response, ui_session)
+    return response
+
+
+@router.get("/reconcile", response_class=HTMLResponse)
+def reconcile_page(request: Request) -> Response:
+    ui_session = get_request_session(request)
+    if ui_session is None or not ui_session.authenticated:
+        return RedirectResponse(url="/ui/connect", status_code=HTTP_303_SEE_OTHER)
+
+    response = templates.TemplateResponse(
+        request,
+        "reconcile.html",
+        {
+            "csrf_token": ui_session.csrf_token,
+            "authenticated": True,
+            "error": None,
+            "notice": None,
+            "summary": None,
+            "dry_run_default": True,
+        },
+    )
+    set_session_cookie(response, ui_session)
+    return response
+
+
+@router.post("/reconcile", response_class=HTMLResponse)
+def reconcile_submit(
+    request: Request,
+    csrf_token: str = Form(...),
+    dry_run: str | None = Form(default=None),
+    limit: str | None = Form(default=None),
+    service: ReconcileService = Depends(get_ui_reconcile_service),
+) -> Response:
+    ui_session = get_request_session(request)
+    if ui_session is None or not ui_session.authenticated:
+        return RedirectResponse(url="/ui/connect", status_code=HTTP_303_SEE_OTHER)
+
+    error = None
+    notice = None
+    summary_view = None
+    if not _validate_csrf(ui_session.csrf_token, csrf_token):
+        error = "Invalid CSRF token"
+    else:
+        parsed_limit = None
+        if limit and limit.strip():
+            try:
+                parsed_limit = int(limit.strip())
+                if parsed_limit < 1:
+                    raise ValueError
+            except ValueError:
+                error = "Limit must be a positive integer"
+        if error is None:
+            try:
+                result = service.reconcile(
+                    ui_session.paperless_authorization or "",
+                    dry_run=bool(dry_run),
+                    limit=parsed_limit,
+                )
+                summary_view = SimpleNamespace(
+                    human_summary=result.human_summary(),
+                    created=result.created,
+                    missing_in_paperless=result.missing_in_paperless,
+                    inaccessible_in_paperless=result.inaccessible_in_paperless,
+                    already_present=result.already_present,
+                    errors=result.errors,
+                )
+                notice = "Dry-run complete" if result.dry_run else "Reconciliation applied"
+                if not session_store.rotate_csrf(ui_session):
+                    response = RedirectResponse(url="/ui/connect", status_code=HTTP_303_SEE_OTHER)
+                    clear_session_cookie(response)
+                    return response
+            except Exception as exc:  # noqa: BLE001 - surface as UI error state
+                error = str(exc)
+
+    response = templates.TemplateResponse(
+        request,
+        "reconcile.html",
+        {
+            "csrf_token": ui_session.csrf_token,
+            "authenticated": True,
+            "error": error,
+            "notice": notice,
+            "summary": summary_view,
+            "dry_run_default": bool(dry_run) if dry_run is not None else True,
+        },
+        status_code=400 if error else 200,
+    )
     set_session_cookie(response, ui_session)
     return response

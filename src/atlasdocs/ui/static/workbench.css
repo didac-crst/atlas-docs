@@ -50,6 +50,68 @@ body {
   margin-top: 0.5rem;
 }
 
+.site-nav {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.site-nav a {
+  color: var(--atlas);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.site-nav a:hover,
+.site-nav a:focus-visible {
+  border-bottom-color: var(--atlas);
+}
+
+.doc-meta {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.reconcile {
+  max-width: 42rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.reconcile-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 24rem;
+}
+
+.reconcile-form .check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.reconcile-form input[type="number"] {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  background: #fff;
+  font: inherit;
+}
+
+.summary {
+  white-space: pre-wrap;
+  background: #fff;
+  border: 1px solid var(--line);
+  padding: 0.75rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+.ref-list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
 main {
   padding: 1rem clamp(1rem, 3vw, 2rem) 2rem;
 }
