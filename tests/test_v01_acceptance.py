@@ -16,6 +16,7 @@ from atlasdocs.db.models import (
     Base,
     Concept,
     ExternalReference,
+    Relationship,
     RelationshipType,
 )
 from atlasdocs.db.seed import seed_from_path
@@ -442,12 +443,11 @@ def test_symmetric_relationship_creates_companion_edge(client: TestClient) -> No
 
     session = get_session_factory()()
     try:
-        from atlasdocs.db.models import Relationship
-
         edges = list(session.scalars(select(Relationship)))
         assert len(edges) == 2
-        pairs = {(str(e.source_entity_id), str(e.target_entity_id)) for e in edges}
-        assert len(pairs) == 2
+        pairs = {(e.source_entity_id, e.target_entity_id) for e in edges}
+        forward = next(iter(pairs))
+        assert {(forward[1], forward[0])} == pairs - {forward}
     finally:
         session.close()
 
@@ -463,8 +463,6 @@ def test_inverse_relationship_materializes_companion(client: TestClient) -> None
 
     session = get_session_factory()()
     try:
-        from atlasdocs.db.models import Relationship
-
         edges = list(
             session.scalars(
                 select(Relationship).options(
@@ -472,8 +470,12 @@ def test_inverse_relationship_materializes_companion(client: TestClient) -> None
                 )
             )
         )
-        codes = sorted(e.relationship_type.code for e in edges)
-        assert codes == ["answered-by", "replies-to"]
+        by_code = {e.relationship_type.code: e for e in edges}
+        assert set(by_code) == {"answered-by", "replies-to"}
+        forward = by_code["replies-to"]
+        inverse = by_code["answered-by"]
+        assert inverse.source_entity_id == forward.target_entity_id
+        assert inverse.target_entity_id == forward.source_entity_id
     finally:
         session.close()
 

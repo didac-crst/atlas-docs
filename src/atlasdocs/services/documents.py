@@ -148,17 +148,24 @@ class DocumentService:
         if existing is not None:
             return existing.entity
 
-        entity = Entity(entity_type=EntityType.document)
-        self._session.add(entity)
-        self._session.flush()
-        reference = ExternalReference(
-            entity_id=entity.id,
-            system=EXTERNAL_SYSTEM_PAPERLESS,
-            external_id=self._paperless_external_id(paperless_document_id),
-        )
-        self._session.add(reference)
-        self._session.flush()
-        return entity
+        try:
+            with self._session.begin_nested():
+                entity = Entity(entity_type=EntityType.document)
+                self._session.add(entity)
+                self._session.flush()
+                reference = ExternalReference(
+                    entity_id=entity.id,
+                    system=EXTERNAL_SYSTEM_PAPERLESS,
+                    external_id=self._paperless_external_id(paperless_document_id),
+                )
+                self._session.add(reference)
+                self._session.flush()
+                return entity
+        except IntegrityError:
+            existing = self._get_external_reference(paperless_document_id)
+            if existing is None:
+                raise
+            return existing.entity
 
     def _resolve_target_concept(
         self, relationship_type: RelationshipType, target: str
@@ -272,9 +279,11 @@ class DocumentService:
             prompt_version=prompt_version,
             generated_at=generated_at,
         )
-        self._session.add(relationship)
         try:
-            self._session.flush()
+            with self._session.begin_nested():
+                self._session.add(relationship)
+                self._session.flush()
+                return relationship
         except IntegrityError as exc:
             if require_new:
                 raise ConflictError(
@@ -284,7 +293,6 @@ class DocumentService:
             if existing is None:
                 raise
             return existing
-        return relationship
 
     def get_document(self, paperless_document_id: int, token: str | None = None) -> DocumentSemantics:
         auth = self._require_token(token)

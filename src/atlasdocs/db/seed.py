@@ -112,12 +112,30 @@ def apply_seed(session: Session, data: dict) -> None:
         if not inverse_code:
             rel_type.inverse_relationship_type_id = None
             continue
+        if rel_type.directionality == RelationshipDirectionality.symmetric:
+            raise ValueError(
+                f"Symmetric relationship type '{item['code']}' must not declare an inverse"
+            )
         inverse = rel_types.get(inverse_code) or session.scalar(
             select(RelationshipType).where(RelationshipType.code == inverse_code)
         )
         if inverse is None:
             raise ValueError(f"Unknown inverse relationship type '{inverse_code}'")
+        if inverse.code == rel_type.code:
+            raise ValueError(
+                f"Relationship type '{item['code']}' must not be its own inverse"
+            )
         rel_type.inverse_relationship_type_id = inverse.id
+
+    session.flush()
+    for rel_type in rel_types.values():
+        if rel_type.inverse_relationship_type_id is None:
+            continue
+        partner = session.get(RelationshipType, rel_type.inverse_relationship_type_id)
+        if partner is None or partner.inverse_relationship_type_id != rel_type.id:
+            raise ValueError(
+                f"Inverse of '{rel_type.code}' must declare '{rel_type.code}' as its inverse"
+            )
 
 
 def seed_from_path(session: Session, path: Path) -> None:

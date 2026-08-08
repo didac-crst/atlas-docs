@@ -76,7 +76,7 @@ def upgrade() -> None:
             "SELECT entity_id, paperless_document_id, created_at FROM document_references"
         )
     ).fetchall()
-    for entity_id, paperless_document_id, created_at in docs:
+    if docs:
         bind.execute(
             sa.text(
                 """
@@ -84,12 +84,15 @@ def upgrade() -> None:
                 VALUES (:id, :entity_id, 'paperless', :external_id, :created_at)
                 """
             ),
-            {
-                "id": str(uuid.uuid4()),
-                "entity_id": str(entity_id),
-                "external_id": str(paperless_document_id),
-                "created_at": created_at,
-            },
+            [
+                {
+                    "id": str(uuid.uuid4()),
+                    "entity_id": str(entity_id),
+                    "external_id": str(paperless_document_id),
+                    "created_at": created_at,
+                }
+                for entity_id, paperless_document_id, created_at in docs
+            ],
         )
 
     op.add_column(
@@ -191,6 +194,26 @@ def downgrade() -> None:
         )
 
     op.add_column("relationships", sa.Column("target_concept_id", sa.Uuid(), nullable=True))
+    # v0.1 only allowed concept targets and document sources. Drop edges that
+    # cannot round-trip before restoring those foreign keys.
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM relationships
+            WHERE target_entity_id NOT IN (SELECT id FROM concepts)
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM relationships
+            WHERE source_entity_id IN (
+                SELECT id FROM entities WHERE entity_type = 'concept'
+            )
+            """
+        )
+    )
     op.execute(sa.text("UPDATE relationships SET target_concept_id = target_entity_id"))
     op.execute(
         sa.text(
