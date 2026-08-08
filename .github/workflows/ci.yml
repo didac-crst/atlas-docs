@@ -1,8 +1,8 @@
 name: CI
 
 # HTTPS smoke tests against live Paperless/Satlas stay manual and out of CI.
-# This workflow verifies code, migrations, packaging, and (on main/tags) image publish.
-# Image publish runs only after test + container succeed; failed CI never publishes.
+# This workflow verifies code, migrations, packaging, frontend, and (on main/tags) image publish.
+# Image publish runs only after test + frontend + e2e + container + hygiene succeed; failed CI never publishes.
 
 on:
   pull_request:
@@ -18,6 +18,54 @@ permissions:
   packages: write
 
 jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Whitespace conflict markers (git diff --check)
+        run: |
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            git diff --check origin/main...HEAD
+          else
+            git diff --check
+          fi
+
+      - name: Secret and token leak scan (tracked source)
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r file; do
+            case "$file" in
+              *.png|*.jpg|*.jpeg|*.gif|*.webp|*.ico|*.pdf|*.woff|*.woff2|*.ttf) continue ;;
+              package-lock.json|frontend/package-lock.json) continue ;;
+            esac
+            if git grep -nI -E \
+              '(ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY-----)' \
+              -- "$file" >/tmp/leak-hits.txt 2>/dev/null; then
+              echo "::error file=$file::Possible secret material"
+              cat /tmp/leak-hits.txt
+              fail=1
+            fi
+            if git grep -nIi -E \
+              '(api[_-]?key|client_secret|password|private_key)\s*[:=]\s*["'"'"'][^"'"'"']{20,}["'"'"']' \
+              -- "$file" >/tmp/cred-hits.txt 2>/dev/null; then
+              while IFS= read -r hit; do
+                if echo "$hit" | grep -Eiq \
+                  'test-token|test-secret|dev-only-change-me|e2e-session-secret|example\.test|YOUR_PAPERLESS|SESSION_SECRET|DATABASE_PASSWORD|change-me|atlasdocs"|atlasdocs'\'''; then
+                  continue
+                fi
+                echo "::error file=$file::Possible hardcoded credential assignment"
+                echo "$hit"
+                fail=1
+              done < /tmp/cred-hits.txt
+            fi
+          done < <(git ls-files)
+          exit "$fail"
+
   test:
     runs-on: ubuntu-latest
     services:
@@ -52,8 +100,71 @@ jobs:
           ATLASDOCS_TEST_DATABASE_URL: postgresql+psycopg://atlasdocs:atlasdocs@localhost:5432/atlasdocs_migration
         run: pytest
 
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package.json
+
+      - name: Install, Vitest, and TypeScript/Vite build
+        working-directory: frontend
+        run: |
+          npm install
+          npm test
+          npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [frontend]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package.json
+            frontend/package.json
+
+      - name: Install backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Build SPA into src/atlasdocs/ui/spa
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+          test -f ../src/atlasdocs/ui/spa/index.html
+
+      - name: Install Playwright
+        run: |
+          npm install
+          npx playwright install chromium --with-deps
+
+      - name: Run Playwright smoke tests (mocked Paperless)
+        run: npx playwright test
+
   container:
     runs-on: ubuntu-latest
+    needs: [test, frontend, hygiene]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,7 +184,7 @@ jobs:
           tags: atlasdocs:ci
 
   publish:
-    needs: [test, container]
+    needs: [test, frontend, e2e, container, hygiene]
     if: >-
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))

@@ -28,6 +28,9 @@ services:
       DATABASE_USER: atlasdocs
       DATABASE_PASSWORD: atlasdocs
       PAPERLESS_BASE_URL: http://host.docker.internal:8000
+      # Browser-facing Paperless UI origin (optional). Do not point this at the
+      # internal Docker hostname; use the URL users open in a browser.
+      # PAPERLESS_PUBLIC_URL: http://localhost:8000
       ATLASDOCS_ENV: development
       SESSION_SECRET: dev-only-change-me
       SESSION_SECURE: "false"

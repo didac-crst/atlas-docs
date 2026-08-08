@@ -25,6 +25,9 @@ class PaperlessUnavailableError(PaperlessError):
 class PaperlessDocument:
     id: int
     title: str | None = None
+    created_date: str | None = None
+    correspondent: str | None = None
+    document_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,23 @@ class PaperlessDocumentPage:
     results: list[PaperlessDocument]
     has_next: bool
     has_previous: bool
+
+
+def _label_from_field(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, dict):
+        for key in ("name", "slug", "title"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        return None
+    if isinstance(value, int):
+        return None
+    return None
 
 
 class PaperlessClient:
@@ -89,8 +109,19 @@ class PaperlessClient:
         title = payload.get("title")
         if title is not None and not isinstance(title, str):
             raise PaperlessUnavailableError("Paperless document payload has invalid title")
+        created = payload.get("created_date")
+        if created is None:
+            created = payload.get("created")
+        if created is not None and not isinstance(created, str):
+            created = str(created)
         try:
-            return PaperlessDocument(id=int(payload["id"]), title=title)
+            return PaperlessDocument(
+                id=int(payload["id"]),
+                title=title,
+                created_date=created,
+                correspondent=_label_from_field(payload.get("correspondent")),
+                document_type=_label_from_field(payload.get("document_type")),
+            )
         except (TypeError, ValueError) as exc:
             raise PaperlessUnavailableError("Paperless returned malformed document payload") from exc
 
@@ -134,3 +165,24 @@ class PaperlessClient:
 
     def assert_accessible(self, document_id: int, token: str) -> PaperlessDocument:
         return self.get_document(document_id, token=token)
+
+    def validate_token(self, token: str) -> None:
+        """Verify the token is accepted by Paperless (does not authorize a document)."""
+        self.list_documents(token, page=1, page_size=1)
+
+    def iter_all_documents(self, token: str, *, page_size: int = 100, limit: int | None = None):
+        """Yield Paperless documents across pages until exhausted or ``limit`` reached."""
+        page = 1
+        yielded = 0
+        while True:
+            batch = self.list_documents(token, page=page, page_size=page_size)
+            if not batch.results:
+                break
+            for doc in batch.results:
+                yield doc
+                yielded += 1
+                if limit is not None and yielded >= limit:
+                    return
+            if not batch.has_next:
+                break
+            page += 1

@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     database_password: SecretStr = SecretStr(DEFAULT_DATABASE_PASSWORD)
 
     paperless_base_url: str = "http://localhost:8000"
+    # Browser-facing Paperless origin for "Open in Paperless" links. Never use
+    # paperless_base_url (often an internal Docker hostname) for browser links.
+    paperless_public_url: str | None = None
     paperless_timeout_seconds: float = 10.0
     seed_path: str = "config/seed/v0.1.yaml"
 
@@ -48,6 +51,33 @@ class Settings(BaseSettings):
     @classmethod
     def _strip_session_secret(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("paperless_public_url", mode="before")
+    @classmethod
+    def _empty_public_url_to_none(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("paperless_public_url")
+    @classmethod
+    def _normalize_public_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip().rstrip("/")
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(cleaned)
+        if parts.scheme not in {"http", "https"}:
+            raise ValueError("PAPERLESS_PUBLIC_URL must be an http(s) URL")
+        if parts.username is not None or parts.password is not None:
+            raise ValueError("PAPERLESS_PUBLIC_URL must not include credentials")
+        if not parts.netloc:
+            raise ValueError("PAPERLESS_PUBLIC_URL must include a host")
+        # Rebuild without query/fragment/credentials.
+        return f"{parts.scheme}://{parts.netloc}{parts.path}".rstrip("/")
 
     @field_validator("unclassified_max_upstream_pages")
     @classmethod
@@ -94,8 +124,15 @@ class Settings(BaseSettings):
             database=self.database_name,
         )
 
-    def paperless_document_url(self, paperless_document_id: int) -> str:
-        return f"{self.paperless_base_url.rstrip('/')}/documents/{paperless_document_id}/"
+    def paperless_document_url(self, paperless_document_id: int) -> str | None:
+        """Browser link to the Paperless document detail page.
+
+        Uses PAPERLESS_PUBLIC_URL only. Returns None when unset so the UI can
+        hide/disable the action. Never falls back to PAPERLESS_BASE_URL.
+        """
+        if not self.paperless_public_url:
+            return None
+        return f"{self.paperless_public_url}/documents/{paperless_document_id}/"
 
 
 @lru_cache

@@ -12,15 +12,13 @@ This repository is the public product. It must be deployable independently of Sa
 
 ## Status
 
-v0.3 generalizes persistence to Entity + ExternalReference (concepts as
-entities, entity-to-entity relationships) while keeping the
-`/documents/{paperless_id}` API as a compatibility facade. See
-`docs/architecture-assessment.md`, `docs/v0.3-roadmap.md`, and
-`docs/v0.3-migration-plan.md`.
+v0.4 adds a general entity relationship API, Paperless reconciliation
+(`atlasdocs reconcile` / `/ui/reconcile`), and a React classification workbench
+on the v0.3 Entity + ExternalReference core.
 
-v0.2 adds a small server-rendered classification workbench on the v0.1 API: needs-classification queue, document detail, and relationship create/delete.
-
-See also `docs/ROADMAP.md` and `docs/v0.2-ui-design-proposal.md`.
+See `docs/v0.4-semantic-workbench.md`, `docs/frontend-architecture.md`,
+`docs/reconciliation.md`, `docs/architecture-assessment.md`, and
+`docs/v0.3-roadmap.md`.
 
 ## Quick start (development)
 
@@ -29,8 +27,15 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 
-# API/UI tests use SQLite and a mocked Paperless client
+# API/BFF tests use SQLite and a mocked Paperless client
 pytest
+
+# Frontend unit tests + SPA build (copies into src/atlasdocs/ui/spa)
+cd frontend && npm install && npm test && npm run build && cd ..
+
+# Playwright smoke (desktop + mobile) against mocked Paperless
+npm install && npx playwright install chromium
+npm run test:e2e
 
 # Full stack with PostgreSQL
 docker compose up --build
@@ -52,11 +57,13 @@ curl 'http://localhost:8080/documents?unclassified=true&page=1&page_size=25' \
 
 ## Layout
 
-- `src/atlasdocs/` — FastAPI service, domain model, Paperless REST client, Jinja UI
+- `src/atlasdocs/` — FastAPI service, domain model, Paperless REST client, UI BFF + SPA assets
+- `frontend/` — React + TypeScript + Vite workbench
+- `e2e/` — Playwright smoke tests
 - `config/seed/` — version-controlled ontology seed data
 - `alembic/` — reproducible PostgreSQL migrations
 - `docs/` — product architecture and roadmap
-- `.github/workflows/ci.yml` — tests (including Postgres migration), container build, and gated GHCR publish
+- `.github/workflows/ci.yml` — pytest, frontend, Playwright, container build, gated GHCR publish
 - `migration/`, `semantic/` — reserved future boundaries
 
 ## Configuration
@@ -70,7 +77,8 @@ Environment variables:
 | `DATABASE_NAME` | Database name (default `atlasdocs`) |
 | `DATABASE_USER` | Database user (default `atlasdocs`) |
 | `DATABASE_PASSWORD` | Database password (default `atlasdocs`; must be non-default in production) |
-| `PAPERLESS_BASE_URL` | Paperless origin, no trailing path |
+| `PAPERLESS_BASE_URL` | Paperless origin for **server-to-server REST** (may be an internal Docker hostname) |
+| `PAPERLESS_PUBLIC_URL` | Optional browser-facing Paperless origin for **Open in Paperless** links. Never falls back to `PAPERLESS_BASE_URL`. When unset, the action is hidden/disabled. |
 | `PAPERLESS_TIMEOUT_SECONDS` | Upstream timeout |
 | `ATLASDOCS_ENV` | **Required.** `development` or `production` (no silent default) |
 | `SESSION_SECRET` | Required non-default secret in production |
@@ -86,7 +94,7 @@ The UI keeps Paperless tokens in a server-side session. The browser only receive
 
 Unclassified listing fetches one Paperless page (`page_size` default/max 25) and filters with a single AtlasDocs query for confirmed relationships.
 
-Duplicate relationships for the same document, type, and target are rejected with HTTP 409. Browser mutations use CSRF-protected POST forms.
+Duplicate relationships for the same document, type, and target are rejected with HTTP 409. Browser mutations use CSRF-protected BFF calls (`X-CSRF-Token`).
 
 The private Satellite deployment lives separately in `satlas-docs` and consumes AtlasDocs through a pinned release or container image.
 

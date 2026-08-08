@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from atlasdocs.api import create_app
-from atlasdocs.config import UNCLASSIFIED_PAGE_SIZE, get_settings
 from atlasdocs.db.models import (
     EXTERNAL_SYSTEM_PAPERLESS,
     Base,
@@ -20,126 +16,10 @@ from atlasdocs.db.models import (
     RelationshipType,
 )
 from atlasdocs.db.seed import seed_from_path
-from atlasdocs.db.session import get_db, get_engine, get_session_factory, reset_engine
-from atlasdocs.services.paperless import PaperlessClient
+from atlasdocs.db.session import get_engine, get_session_factory, reset_engine
 from atlasdocs.ui.sessions import session_store
-
-SEED_PATH = Path(__file__).resolve().parents[1] / "config" / "seed" / "v0.1.yaml"
 AUTH = {"Authorization": "Token test-token"}
-
-
-class FakePaperlessTransport(httpx.BaseTransport):
-    """Deterministic Paperless REST stand-in. No real HTTP or Paperless DB."""
-
-    def __init__(self) -> None:
-        self.documents: dict[int, dict] = {
-            184: {"id": 184, "title": "Payslip Germany"},
-            185: {"id": 185, "title": "Invoice Spain"},
-            186: {"id": 186, "title": "Already classified"},
-        }
-        self.denied: set[int] = set()
-        self.unauthorized: set[int] = set()
-        self.server_error: set[int] = set()
-        self.timeout: set[int] = set()
-        self.list_denied = False
-        self.list_server_error = False
-        self.calls: list[str] = []
-        self.document_calls: list[int] = []
-
-    def handle_request(self, request: httpx.Request) -> httpx.Response:
-        path = request.url.path.rstrip("/")
-        self.calls.append(f"{request.method} {request.url.path}?{request.url.query}")
-
-        if path.endswith("/api/documents"):
-            if self.list_server_error:
-                return httpx.Response(503, json={"detail": "unavailable"})
-            if self.list_denied:
-                return httpx.Response(403, json={"detail": "forbidden"})
-            query = parse_qs(urlparse(str(request.url)).query)
-            page = int(query.get("page", ["1"])[0])
-            page_size = int(query.get("page_size", [str(UNCLASSIFIED_PAGE_SIZE)])[0])
-            ordered = sorted(self.documents.values(), key=lambda item: item["id"])
-            start = (page - 1) * page_size
-            chunk = ordered[start : start + page_size]
-            return httpx.Response(
-                200,
-                json={
-                    "count": len(ordered),
-                    "next": "next" if start + page_size < len(ordered) else None,
-                    "previous": "prev" if page > 1 else None,
-                    "results": chunk,
-                },
-            )
-
-        document_id = int(path.split("/")[-1])
-        self.document_calls.append(document_id)
-        if document_id in self.timeout:
-            raise httpx.TimeoutException("timed out", request=request)
-        if document_id in self.server_error:
-            return httpx.Response(503, json={"detail": "unavailable"})
-        if document_id in self.unauthorized:
-            return httpx.Response(401, json={"detail": "unauthorized"})
-        if document_id in self.denied:
-            return httpx.Response(403, json={"detail": "forbidden"})
-        if document_id not in self.documents:
-            return httpx.Response(404, json={"detail": "not found"})
-        return httpx.Response(200, json=self.documents[document_id])
-
-
-@pytest.fixture()
-def paperless_transport() -> FakePaperlessTransport:
-    return FakePaperlessTransport()
-
-
-@pytest.fixture()
-def client(paperless_transport: FakePaperlessTransport, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    get_settings.cache_clear()
-    monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("ATLASDOCS_ENV", "development")
-    monkeypatch.setenv("SESSION_SECURE", "false")
-    get_settings.cache_clear()
-    session_store.clear()
-    reset_engine()
-    db_path = tmp_path / "atlasdocs.db"
-    engine = get_engine(f"sqlite+pysqlite:///{db_path}")
-    Base.metadata.create_all(engine)
-
-    session = get_session_factory()()
-    seed_from_path(session, SEED_PATH)
-    session.commit()
-    session.close()
-
-    app = create_app()
-
-    def override_db():
-        session = get_session_factory()()
-        try:
-            yield session
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-
-    def override_paperless() -> PaperlessClient:
-        return PaperlessClient(
-            base_url="http://paperless.test",
-            transport=paperless_transport,
-        )
-
-    from atlasdocs.api.routes import get_paperless_client
-
-    app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_paperless_client] = override_paperless
-
-    with TestClient(app) as test_client:
-        yield test_client
-
-    app.dependency_overrides.clear()
-    session_store.clear()
-    reset_engine()
-    get_settings.cache_clear()
+SEED_PATH = Path(__file__).resolve().parents[1] / "config" / "seed" / "v0.1.yaml"
 
 
 def test_health(client: TestClient) -> None:
@@ -163,13 +43,27 @@ def test_seed_loads_ontologies_and_relationship_types(client: TestClient) -> Non
     session = get_session_factory()()
     try:
         concepts = {c.name for c in session.scalars(select(Concept))}
-        assert concepts == {"France", "Germany", "Spain", "Payslip", "Invoice"}
+        assert concepts == {
+            "France",
+            "Germany",
+            "Spain",
+            "Payslip",
+            "Invoice",
+            "Alice",
+            "Bob",
+            "Acme",
+            "Contoso",
+        }
         types = {t.code for t in session.scalars(select(RelationshipType))}
         assert types == {
             "source-country",
             "document-type",
             "concerns",
+            "issued-by",
+            "concerns-person",
             "related-to",
+            "derived-from",
+            "has-derivative",
             "replies-to",
             "answered-by",
         }
@@ -190,8 +84,8 @@ def test_seed_is_idempotent(tmp_path: Path) -> None:
         seed_from_path(session, SEED_PATH)
         seed_from_path(session, SEED_PATH)
         session.commit()
-        assert len(list(session.scalars(select(Concept)))) == 5
-        assert len(list(session.scalars(select(RelationshipType)))) == 6
+        assert len(list(session.scalars(select(Concept)))) == 9
+        assert len(list(session.scalars(select(RelationshipType)))) == 10
     finally:
         session.close()
         reset_engine()
@@ -207,7 +101,8 @@ def test_create_and_get_relationship(client: TestClient) -> None:
     body = create.json()
     assert body["paperless_document_id"] == 184
     assert body["title"] == "Payslip Germany"
-    assert body["open_url"].endswith("/documents/184/")
+    assert body["open_url"] == "http://paperless.example.test/documents/184/"
+    assert "Token" not in body["open_url"]
     assert len(body["relationships"]) == 1
     assert body["relationships"][0]["type"] == "source-country"
     assert body["relationships"][0]["target"] == "Germany"
@@ -272,16 +167,16 @@ def test_invalid_target_rejected(client: TestClient) -> None:
         headers=AUTH,
         json={"relationship": "source-country", "target": "Atlantis"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 422
 
 
 def test_invalid_relationship_type_rejected(client: TestClient) -> None:
     response = client.post(
         "/documents/184/relationships",
         headers=AUTH,
-        json={"relationship": "issued-by", "target": "Germany"},
+        json={"relationship": "not-a-real-type", "target": "Germany"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 422
 
 
 def test_paperless_server_error(client: TestClient, paperless_transport: FakePaperlessTransport) -> None:
@@ -418,7 +313,11 @@ def test_relationship_types_and_concepts(client: TestClient) -> None:
         "source-country",
         "document-type",
         "concerns",
+        "issued-by",
+        "concerns-person",
         "related-to",
+        "derived-from",
+        "has-derivative",
         "replies-to",
         "answered-by",
     }
@@ -513,24 +412,26 @@ def test_get_document_with_multiple_relationships(client: TestClient) -> None:
 
 
 def test_ui_requires_session_and_hides_token(client: TestClient) -> None:
-    assert client.get("/ui", follow_redirects=False).status_code == 303
-    connect = client.get("/ui/connect")
-    assert connect.status_code == 200
-    assert "paperless_token" in connect.text
-    assert "test-token" not in connect.text
-    assert "Token " not in connect.text or "Paperless token" in connect.text
+    spa = client.get("/ui/")
+    assert spa.status_code in {200, 503}
+    session = client.get("/ui/api/session")
+    assert session.status_code == 200
+    body = session.json()
+    assert body["authenticated"] is False
+    assert body["csrf_token"]
+    assert "Token " not in session.text
+    assert "paperless" not in body
 
 
 def test_session_cookie_is_opaque_and_excludes_paperless_token(client: TestClient) -> None:
-    connect_page = client.get("/ui/connect")
-    csrf = connect_page.text.split('name="csrf_token" value="')[1].split('"')[0]
+    session = client.get("/ui/api/session").json()
     secret = "super-secret-paperless-token-value"
     connected = client.post(
-        "/ui/connect",
-        data={"csrf_token": csrf, "paperless_token": secret},
-        follow_redirects=False,
+        "/ui/api/connect",
+        json={"csrf_token": session["csrf_token"], "paperless_token": secret},
     )
-    assert connected.status_code == 303
+    assert connected.status_code == 200
+    assert connected.json()["authenticated"] is True
 
     set_cookie = connected.headers.get("set-cookie", "")
     assert "atlasdocs_sid=" in set_cookie
@@ -539,6 +440,7 @@ def test_session_cookie_is_opaque_and_excludes_paperless_token(client: TestClien
     assert secret not in set_cookie
     assert "Token " not in set_cookie
     assert f"Token {secret}" not in set_cookie
+    assert secret not in connected.text
 
     cookie_value = client.cookies.get("atlasdocs_sid")
     assert cookie_value
@@ -551,55 +453,46 @@ def test_session_cookie_is_opaque_and_excludes_paperless_token(client: TestClien
 
 
 def test_ui_logout_invalidates_server_session(client: TestClient) -> None:
-    connect_page = client.get("/ui/connect")
-    csrf = connect_page.text.split('name="csrf_token" value="')[1].split('"')[0]
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
     client.post(
-        "/ui/connect",
-        data={"csrf_token": csrf, "paperless_token": "test-token"},
-        follow_redirects=False,
+        "/ui/api/connect",
+        json={"csrf_token": csrf, "paperless_token": "test-token"},
     )
     sid = client.cookies.get("atlasdocs_sid")
     assert session_store.get(sid) is not None
 
-    workbench = client.get("/ui")
-    csrf = workbench.text.split('name="csrf_token" value="')[1].split('"')[0]
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
     disconnected = client.post(
-        "/ui/disconnect",
-        data={"csrf_token": csrf},
-        follow_redirects=False,
+        "/ui/api/disconnect",
+        json={"csrf_token": csrf},
+        headers={"X-CSRF-Token": csrf},
     )
-    assert disconnected.status_code == 303
+    assert disconnected.status_code == 200
+    assert disconnected.json()["authenticated"] is False
     assert session_store.get(sid) is None
-    assert client.get("/ui", follow_redirects=False).status_code == 303
+    assert client.get("/ui/api/documents").status_code == 401
 
 
-def test_ui_classify_via_post_form(client: TestClient) -> None:
-    connect_page = client.get("/ui/connect")
-    csrf = connect_page.text.split('name="csrf_token" value="')[1].split('"')[0]
+def test_ui_classify_via_bff(client: TestClient) -> None:
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
     connected = client.post(
-        "/ui/connect",
-        data={"csrf_token": csrf, "paperless_token": "test-token"},
-        follow_redirects=False,
+        "/ui/api/connect",
+        json={"csrf_token": csrf, "paperless_token": "test-token"},
     )
-    assert connected.status_code == 303
+    assert connected.status_code == 200
+    csrf = connected.json()["csrf_token"]
 
-    detail = client.get("/ui/documents/184")
+    detail = client.get("/ui/api/documents/184")
     assert detail.status_code == 200
-    assert "Payslip Germany" in detail.text
+    assert detail.json()["title"] == "Payslip Germany"
     assert "test-token" not in detail.text
-    csrf = detail.text.split('name="csrf_token" value="')[1].split('"')[0]
 
     classified = client.post(
-        "/ui/documents/184/relationships",
-        data={
-            "csrf_token": csrf,
-            "relationship": "source-country",
-            "target": "Germany",
-            "page": "1",
-        },
-        follow_redirects=True,
+        "/ui/api/documents/184/relationships",
+        headers={"X-CSRF-Token": csrf},
+        json={"relationship": "source-country", "target": "Germany"},
     )
-    assert classified.status_code == 200
-    assert "source-country" in classified.text
-    assert "Germany" in classified.text
+    assert classified.status_code == 201
+    body = classified.json()
+    assert any(item["type"] == "source-country" and item["target"] == "Germany" for item in body["relationships"])
     assert "test-token" not in classified.text
