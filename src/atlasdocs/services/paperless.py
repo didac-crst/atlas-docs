@@ -52,8 +52,6 @@ def _label_from_field(value: object) -> str | None:
             if isinstance(candidate, str) and candidate.strip():
                 return candidate.strip()
         return None
-    if isinstance(value, int):
-        return None
     return None
 
 
@@ -69,6 +67,8 @@ class PaperlessClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_seconds
         self._transport = transport
+        self._correspondent_names: dict[int, str | None] = {}
+        self._document_type_names: dict[int, str | None] = {}
 
     def _headers(self, token: str) -> dict[str, str]:
         if token.lower().startswith("token ") or token.lower().startswith("bearer "):
@@ -101,7 +101,34 @@ class PaperlessClient:
         except ValueError as exc:
             raise PaperlessUnavailableError("Paperless returned non-JSON response") from exc
 
-    def _document_from_payload(self, payload: object) -> PaperlessDocument:
+    def _lookup_named_resource(
+        self, resource: str, resource_id: int, token: str, cache: dict[int, str | None]
+    ) -> str | None:
+        if resource_id in cache:
+            return cache[resource_id]
+        url = f"{self._base_url}/api/{resource}/{resource_id}/"
+        response = self._request("GET", url, token)
+        if response.status_code in {401, 403, 404} or response.status_code >= 500:
+            cache[resource_id] = None
+            return None
+        if response.status_code >= 400:
+            cache[resource_id] = None
+            return None
+        label = _label_from_field(self._parse_json(response))
+        cache[resource_id] = label
+        return label
+
+    def _resolve_label(
+        self, value: object, token: str, *, resource: str, cache: dict[int, str | None]
+    ) -> str | None:
+        direct = _label_from_field(value)
+        if direct is not None:
+            return direct
+        if isinstance(value, int):
+            return self._lookup_named_resource(resource, value, token, cache)
+        return None
+
+    def _document_from_payload(self, payload: object, token: str) -> PaperlessDocument:
         if not isinstance(payload, dict):
             raise PaperlessUnavailableError("Paperless returned malformed document payload")
         if "id" not in payload:
@@ -119,8 +146,18 @@ class PaperlessClient:
                 id=int(payload["id"]),
                 title=title,
                 created_date=created,
-                correspondent=_label_from_field(payload.get("correspondent")),
-                document_type=_label_from_field(payload.get("document_type")),
+                correspondent=self._resolve_label(
+                    payload.get("correspondent"),
+                    token,
+                    resource="correspondents",
+                    cache=self._correspondent_names,
+                ),
+                document_type=self._resolve_label(
+                    payload.get("document_type"),
+                    token,
+                    resource="document_types",
+                    cache=self._document_type_names,
+                ),
             )
         except (TypeError, ValueError) as exc:
             raise PaperlessUnavailableError("Paperless returned malformed document payload") from exc
@@ -129,7 +166,7 @@ class PaperlessClient:
         url = f"{self._base_url}/api/documents/{document_id}/"
         response = self._request("GET", url, token)
         self._raise_for_status(response, document_id)
-        return self._document_from_payload(self._parse_json(response))
+        return self._document_from_payload(self._parse_json(response), token)
 
     def list_documents(self, token: str, *, page: int = 1, page_size: int = 25) -> PaperlessDocumentPage:
         url = f"{self._base_url}/api/documents/?page={page}&page_size={page_size}"
@@ -144,7 +181,7 @@ class PaperlessClient:
         if not isinstance(raw_results, list):
             raise PaperlessUnavailableError("Paperless document list has invalid results")
         try:
-            results = [self._document_from_payload(item) for item in raw_results]
+            results = [self._document_from_payload(item, token) for item in raw_results]
             count_raw = payload.get("count", len(results))
             return PaperlessDocumentPage(
                 count=int(count_raw),

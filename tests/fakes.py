@@ -13,20 +13,28 @@ class FakePaperlessTransport(httpx.BaseTransport):
     """Deterministic Paperless REST stand-in. No real HTTP or Paperless DB."""
 
     def __init__(self) -> None:
+        self.correspondents: dict[int, dict] = {
+            1: {"id": 1, "name": "Acme Payroll"},
+            2: {"id": 2, "name": "Contoso"},
+        }
+        self.document_types: dict[int, dict] = {
+            10: {"id": 10, "name": "Payslip"},
+            11: {"id": 11, "name": "Invoice"},
+        }
         self.documents: dict[int, dict] = {
             184: {
                 "id": 184,
                 "title": "Payslip Germany",
                 "created_date": "2024-01-15",
-                "correspondent": {"name": "Acme Payroll"},
-                "document_type": {"name": "Payslip"},
+                "correspondent": 1,
+                "document_type": 10,
             },
             185: {
                 "id": 185,
                 "title": "Invoice Spain",
                 "created_date": "2024-02-01",
-                "correspondent": {"name": "Contoso"},
-                "document_type": {"name": "Invoice"},
+                "correspondent": 2,
+                "document_type": 11,
             },
             186: {"id": 186, "title": "Already classified"},
         }
@@ -42,6 +50,20 @@ class FakePaperlessTransport(httpx.BaseTransport):
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path.rstrip("/")
         self.calls.append(f"{request.method} {request.url.path}?{request.url.query}")
+
+        if "/api/correspondents/" in path:
+            resource_id = int(path.split("/")[-1])
+            payload = self.correspondents.get(resource_id)
+            if payload is None:
+                return httpx.Response(404, json={"detail": "not found"})
+            return httpx.Response(200, json=payload)
+
+        if "/api/document_types/" in path:
+            resource_id = int(path.split("/")[-1])
+            payload = self.document_types.get(resource_id)
+            if payload is None:
+                return httpx.Response(404, json={"detail": "not found"})
+            return httpx.Response(200, json=payload)
 
         if path.endswith("/api/documents"):
             if self.list_server_error:
@@ -63,6 +85,9 @@ class FakePaperlessTransport(httpx.BaseTransport):
                     "results": chunk,
                 },
             )
+
+        if "/api/documents/" not in path:
+            return httpx.Response(404, json={"detail": "not found"})
 
         document_id = int(path.split("/")[-1])
         self.document_calls.append(document_id)

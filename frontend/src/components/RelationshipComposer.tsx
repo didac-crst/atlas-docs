@@ -136,9 +136,14 @@ export function RelationshipComposer({
             <input
               id="concept-q"
               role="combobox"
-              aria-expanded={suggestions.length > 0}
-              aria-controls={listId}
+              aria-expanded={suggestions.length > 0 && !selected}
+              aria-controls={suggestions.length > 0 && !selected ? listId : undefined}
               aria-autocomplete="list"
+              aria-activedescendant={
+                suggestions.length > 0 && !selected
+                  ? `${listId}-option-${highlight}`
+                  : undefined
+              }
               value={selected ? selected.name : query}
               onChange={(event) => {
                 setSelected(null);
@@ -162,10 +167,15 @@ export function RelationshipComposer({
             {suggestions.length > 0 && !selected ? (
               <ul className="suggestions" id={listId} role="listbox">
                 {suggestions.map((item, index) => (
-                  <li key={item.code} role="option" aria-selected={index === highlight}>
+                  <li
+                    key={item.code}
+                    id={`${listId}-option-${index}`}
+                    role="option"
+                    aria-selected={index === highlight}
+                  >
                     <button
                       type="button"
-                      aria-selected={index === highlight}
+                      tabIndex={-1}
                       onClick={() => {
                         setSelected(item);
                         setQuery(item.name);

@@ -36,7 +36,6 @@ from atlasdocs.services.documents import (
 from atlasdocs.services.paperless import PaperlessClient
 from atlasdocs.services.reconcile import ReconcileService
 from atlasdocs.ui.sessions import (
-    clear_session_cookie,
     ensure_session,
     get_request_session,
     session_store,
@@ -202,13 +201,11 @@ def disconnect(request: Request, payload: DisconnectRequest) -> Response:
     if ui_session is not None and _validate_csrf(ui_session.csrf_token, payload.csrf_token):
         session_store.delete(ui_session.id)
     fresh = session_store.create()
-    response = _json_with_session(
+    # _json_with_session sets the replacement cookie; no clear/set dance needed.
+    return _json_with_session(
         SessionResponse(authenticated=False, csrf_token=fresh.csrf_token),
         fresh,
     )
-    clear_session_cookie(response)
-    set_session_cookie(response, fresh)
-    return response
 
 
 @api_router.get("/documents", response_model=UnclassifiedPageResponse)
@@ -335,6 +332,10 @@ def list_relationship_types(
     service: DocumentService = Depends(get_ui_service),
 ) -> JSONResponse:
     ui_session, auth = _require_ui_auth(request)
+    try:
+        rows = service.list_relationship_types(auth)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
     payload = [
         RelationshipTypeResponse(
             code=item.code,
@@ -343,7 +344,7 @@ def list_relationship_types(
             directionality=item.directionality,
             inverse=item.inverse,
         )
-        for item in service.list_relationship_types(auth)
+        for item in rows
     ]
     response = JSONResponse(content=[item.model_dump() for item in payload])
     set_session_cookie(response, ui_session)

@@ -13,41 +13,34 @@ export function DocumentQueue({ queue, selectedId, page, onSelect }: Props) {
     return <p className="empty">No queue loaded.</p>;
   }
 
-  if (queue.items.length === 0) {
-    return (
-      <div>
-        <p className="empty">No unclassified documents in this page.</p>
-        <p className="muted" style={{ fontVariantNumeric: "tabular-nums" }}>
-          Paperless count: {queue.paperless_count}
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div>
       <p className="muted" style={{ fontVariantNumeric: "tabular-nums" }}>
         Page {queue.page} · {queue.items.length} shown · Paperless {queue.paperless_count}
       </p>
-      <ul className="queue-list">
-        {queue.items.map((item) => (
-          <li key={item.paperless_document_id}>
-            <button
-              type="button"
-              className="queue-item"
-              aria-current={selectedId === item.paperless_document_id ? "true" : undefined}
-              onClick={() => onSelect(item.paperless_document_id)}
-            >
-              <strong>{item.title || `Document ${item.paperless_document_id}`}</strong>
-              <span className="meta">
-                {[item.created_date, item.correspondent, item.document_type]
-                  .filter(Boolean)
-                  .join(" · ") || `Paperless #${item.paperless_document_id}`}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
+      {queue.items.length === 0 ? (
+        <p className="empty">No unclassified documents in this page.</p>
+      ) : (
+        <ul className="queue-list">
+          {queue.items.map((item) => (
+            <li key={item.paperless_document_id}>
+              <button
+                type="button"
+                className="queue-item"
+                aria-current={selectedId === item.paperless_document_id ? "true" : undefined}
+                onClick={() => onSelect(item.paperless_document_id)}
+              >
+                <strong>{item.title || `Document ${item.paperless_document_id}`}</strong>
+                <span className="meta">
+                  {[item.created_date, item.correspondent, item.document_type]
+                    .filter(Boolean)
+                    .join(" · ") || `Paperless #${item.paperless_document_id}`}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="site-nav" style={{ marginTop: "1rem" }}>
         {queue.has_previous ? (
           <Link to={`/?page=${page - 1}`}>Previous</Link>
