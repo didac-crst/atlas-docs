@@ -76,12 +76,14 @@ header. The SPA does not send the Paperless token to those paths.
 | POST | `/ui/api/login` | Username/password → server-side token |
 | POST | `/ui/api/connect` | Advanced token paste (dev fallback) |
 | POST | `/ui/api/disconnect` | Invalidate UI session |
+| GET | `/ui/api/home` | Authz-safe task counts + recent activity |
 | GET | `/ui/api/documents` | List with `q`, `classification`, `sort`, `order`, `page` |
 | POST | `/ui/api/documents/bulk-relationships` | Bulk assign (per-doc authz) |
 | GET | `/ui/api/documents/{id}` | Document detail + relationships |
-| POST | `/ui/api/documents/{id}/relationships` | Add relationship |
+| POST | `/ui/api/documents/{id}/relationships` | Add relationship (prefer `target_entity_id`) |
 | DELETE | `/ui/api/relationships/{id}` | Remove relationship |
 | GET | `/ui/api/relationship-types` | Typed relationship catalog |
+| GET | `/ui/api/entities/search` | Atlas entity autocomplete (`q`, `entity_type`, `ontology`) |
 | GET | `/ui/api/concepts` | Concept autocomplete (`q`, `ontology`) |
 | POST | `/ui/api/ingest` | Multipart upload → durable job |
 | GET | `/ui/api/ingest/jobs` | Current identity’s jobs |
@@ -90,6 +92,11 @@ header. The SPA does not send the Paperless token to those paths.
 
 SPA shell routes serve `index.html`. `/ui/api/*` is never shadowed by the SPA
 fallback.
+
+The relationship composer resolves **Atlas entity** targets via
+`/ui/api/entities/search` (no raw Paperless ID field in the progressive UI).
+Paperless identifiers stay in technical details; document detail offers
+**Open original** via `PAPERLESS_PUBLIC_URL` when configured.
 
 ## Product character and brand
 
