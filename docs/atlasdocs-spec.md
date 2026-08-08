@@ -25,6 +25,22 @@ The adapter may have different implementations for local HTTP, a remote deployme
 
 If a user cannot access a Paperless document, AtlasDocs must not expose its existence, metadata, relationships, OCR, summaries, search results, or aggregate counts derived from it.
 
+## Reusing the Paperless viewer
+
+AtlasDocs may reuse the Paperless viewer through a normal document link. A semantic document page can provide an `Open in Paperless` action using the external `paperless_document_id`:
+
+```text
+AtlasDocs semantic page
+        -> Open in Paperless
+        -> Paperless document viewer
+```
+
+Paperless remains responsible for authentication, authorization, preview, OCR display, download, and viewer behavior. AtlasDocs must not copy or reimplement those responsibilities in Phase 1.
+
+The default integration should be a deep link or new-tab navigation. Embedding the Paperless UI in an iframe is not the default because it introduces coupling to frontend routes, browser session behavior, cross-origin policy, Content Security Policy, and future Paperless UI changes. If an embedded or inline preview is required later, it must use documented Paperless API capabilities and preserve Paperless authorization.
+
+This approach preserves viewer functionality without coupling AtlasDocs to Paperless's internal database, filesystem, frontend implementation, or container layout.
+
 ## Semantic model
 
 AtlasDocs owns entities, ontologies, concepts, relationship types, relationships, provenance, and semantic metadata. An AtlasDocs entity UUID is independent from the external Paperless document ID.
