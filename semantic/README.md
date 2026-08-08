@@ -1,3 +1,6 @@
 # Semantic Layer
 
-Reserved for the semantic database, synchronization commands, and classification UI.
+Reserved for future synchronization commands beyond the current workbench.
+
+The semantic core and classification UI live in `src/atlasdocs/` (PostgreSQL model,
+seed loader, REST API, Paperless REST client, and Jinja workbench under `ui/`).

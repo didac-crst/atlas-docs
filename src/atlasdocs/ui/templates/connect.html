@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Connect · AtlasDocs{% endblock %}
+{% block content %}
+<section class="connect" aria-labelledby="connect-title">
+  <h1 id="connect-title">Connect to Paperless</h1>
+  <p class="lede">
+    Enter a Paperless API token for your account. AtlasDocs stores the token
+    server-side and gives the browser only an opaque HttpOnly session cookie.
+    The token is never written into page HTML, JavaScript, or the cookie value.
+  </p>
+  {% if error %}<p class="flash error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/ui/connect" class="connect-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="paperless_token">Paperless token</label>
+    <input id="paperless_token" name="paperless_token" type="password" autocomplete="off" required>
+    <button type="submit">Continue</button>
+  </form>
+</section>
+{% endblock %}
