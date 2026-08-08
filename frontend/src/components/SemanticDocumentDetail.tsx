@@ -37,10 +37,24 @@ export function SemanticDocumentDetail({ document, csrfToken, onRemoved, onError
             .join(" · ") || "No metadata from Paperless"}
         </div>
         {document.open_url ? (
-          <a href={document.open_url} target="_blank" rel="noreferrer">
+          <a
+            href={document.open_url}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="btn btn-secondary"
+          >
             <ExternalLink size={16} aria-hidden /> Open in Paperless
           </a>
-        ) : null}
+        ) : (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled
+            title="PAPERLESS_PUBLIC_URL is not configured"
+          >
+            <ExternalLink size={16} aria-hidden /> Open in Paperless
+          </button>
+        )}
         {document.entity_id ? (
           <details>
             <summary>Technical</summary>

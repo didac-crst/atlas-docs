@@ -33,6 +33,8 @@ def client(paperless_transport: FakePaperlessTransport, tmp_path: Path, monkeypa
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
     monkeypatch.setenv("ATLASDOCS_ENV", "development")
     monkeypatch.setenv("SESSION_SECURE", "false")
+    monkeypatch.setenv("PAPERLESS_PUBLIC_URL", "http://paperless.example.test")
+    monkeypatch.delenv("PAPERLESS_BASE_URL", raising=False)
     get_settings.cache_clear()
     session_store.clear()
     reset_engine()

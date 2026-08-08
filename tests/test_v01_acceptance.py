@@ -101,7 +101,8 @@ def test_create_and_get_relationship(client: TestClient) -> None:
     body = create.json()
     assert body["paperless_document_id"] == 184
     assert body["title"] == "Payslip Germany"
-    assert body["open_url"].endswith("/documents/184/")
+    assert body["open_url"] == "http://paperless.example.test/documents/184/"
+    assert "Token" not in body["open_url"]
     assert len(body["relationships"]) == 1
     assert body["relationships"][0]["type"] == "source-country"
     assert body["relationships"][0]["target"] == "Germany"

@@ -93,7 +93,7 @@ class DocumentSemantics:
     created_date: str | None
     correspondent: str | None
     document_type: str | None
-    open_url: str
+    open_url: str | None
     relationships: list[RelationshipView]
 
 

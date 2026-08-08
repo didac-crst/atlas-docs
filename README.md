@@ -77,7 +77,8 @@ Environment variables:
 | `DATABASE_NAME` | Database name (default `atlasdocs`) |
 | `DATABASE_USER` | Database user (default `atlasdocs`) |
 | `DATABASE_PASSWORD` | Database password (default `atlasdocs`; must be non-default in production) |
-| `PAPERLESS_BASE_URL` | Paperless origin, no trailing path |
+| `PAPERLESS_BASE_URL` | Paperless origin for **server-to-server REST** (may be an internal Docker hostname) |
+| `PAPERLESS_PUBLIC_URL` | Optional browser-facing Paperless origin for **Open in Paperless** links. Never falls back to `PAPERLESS_BASE_URL`. When unset, the action is hidden/disabled. |
 | `PAPERLESS_TIMEOUT_SECONDS` | Upstream timeout |
 | `ATLASDOCS_ENV` | **Required.** `development` or `production` (no silent default) |
 | `SESSION_SECRET` | Required non-default secret in production |

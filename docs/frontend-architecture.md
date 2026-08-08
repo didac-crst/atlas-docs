@@ -21,6 +21,9 @@ Jinja fallback for `/ui`.
   after successful mutations.
 - Unauthorized or inaccessible Paperless documents return 404 from the BFF with
   no semantic leakage (same rule as the Authorization-header API).
+- AtlasDocs does not embed a document viewer. **Open in Paperless** links use
+  `PAPERLESS_PUBLIC_URL` only (never `PAPERLESS_BASE_URL` / Docker hostnames) and
+  never include tokens. When `PAPERLESS_PUBLIC_URL` is unset, the action is disabled.
 
 ## Request flow
 
