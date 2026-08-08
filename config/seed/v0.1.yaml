@@ -1,0 +1,29 @@
+ontologies:
+  - code: country
+    name: Country
+    concepts:
+      - code: france
+        name: France
+      - code: germany
+        name: Germany
+      - code: spain
+        name: Spain
+  - code: document-type
+    name: Document Type
+    concepts:
+      - code: payslip
+        name: Payslip
+      - code: invoice
+        name: Invoice
+
+relationship_types:
+  - code: source-country
+    name: Source Country
+    target_ontology: country
+  - code: document-type
+    name: Document Type
+    target_ontology: document-type
+  - code: concerns
+    name: Concerns
+    # Any concept; resolved by name across ontologies.
+    target_ontology: null
