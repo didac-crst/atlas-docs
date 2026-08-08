@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -71,33 +70,16 @@ def upgrade() -> None:
         sa.UniqueConstraint("system", "external_id", name="uq_external_reference_system_id"),
     )
 
-    docs = bind.execution_options(stream_results=True).execute(
+    # Set-based backfill avoids psycopg server-side cursor + executemany.
+    op.execute(
         sa.text(
-            "SELECT entity_id, paperless_document_id, created_at FROM document_references"
+            """
+            INSERT INTO external_references (id, entity_id, system, external_id, created_at)
+            SELECT gen_random_uuid(), entity_id, 'paperless', paperless_document_id::text, created_at
+            FROM document_references
+            """
         )
     )
-    insert_external_reference = sa.text(
-        """
-        INSERT INTO external_references (id, entity_id, system, external_id, created_at)
-        VALUES (:id, :entity_id, 'paperless', :external_id, :created_at)
-        """
-    )
-    while True:
-        batch = docs.fetchmany(1000)
-        if not batch:
-            break
-        bind.execute(
-            insert_external_reference,
-            [
-                {
-                    "id": str(uuid.uuid4()),
-                    "entity_id": str(entity_id),
-                    "external_id": str(paperless_document_id),
-                    "created_at": created_at,
-                }
-                for entity_id, paperless_document_id, created_at in batch
-            ],
-        )
 
     op.add_column(
         "relationship_types",
