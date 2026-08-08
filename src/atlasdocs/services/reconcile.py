@@ -106,8 +106,11 @@ class ReconcileService:
                     f"Non-integer Paperless external_id on entity {ref.entity_id}"
                 )
                 continue
-            if limit is not None and paperless_id not in seen_ids:
-                # Limited runs only verify references for documents scanned above.
+            if paperless_id in seen_ids:
+                # Already confirmed via the listing scan; avoid a second GET.
+                continue
+            if limit is not None:
+                # Limited runs only create/scan; orphan verification needs a full pass.
                 continue
             try:
                 self._paperless.assert_accessible(paperless_id, token=token)

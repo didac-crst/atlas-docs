@@ -123,6 +123,8 @@ def test_reconcile_idempotent_and_reports_missing_inaccessible(
     finally:
         session.close()
 
+    # 186 is referenced in AtlasDocs but absent from the listing and denied on GET.
+    paperless_transport.documents.pop(186, None)
     paperless_transport.denied.add(186)
 
     first = client.post("/reconcile", headers=AUTH, json={"dry_run": False, "limit": 10})
@@ -131,8 +133,7 @@ def test_reconcile_idempotent_and_reports_missing_inaccessible(
     assert body["paperless_documents_seen"] >= 2
     assert 184 in body["created"] or 184 in body["already_present"]
 
-    # Limited runs only verify references for scanned Paperless ids. A full run
-    # reports missing/inaccessible refs across the AtlasDocs store.
+    # Listed documents are trusted from the scan; a full run only GETs orphans.
     full = client.post("/reconcile", headers=AUTH, json={"dry_run": True})
     assert full.status_code == 200
     assert 999 in full.json()["missing_in_paperless"]

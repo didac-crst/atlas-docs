@@ -9,24 +9,26 @@ function renderQueue(ui: ReactElement) {
 }
 
 describe("DocumentQueue", () => {
-  it("shows empty state", () => {
+  it("shows empty state with pagination", () => {
     renderQueue(
       <DocumentQueue
         queue={{
           items: [],
-          page: 1,
+          page: 2,
           page_size: 25,
-          paperless_count: 0,
+          paperless_count: 40,
           has_next: false,
-          has_previous: false,
+          has_previous: true,
           next_page: null,
         }}
         selectedId={null}
-        page={1}
+        page={2}
         onSelect={() => undefined}
       />,
     );
     expect(screen.getByText(/No unclassified documents/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Previous/i })).toHaveAttribute("href", "/?page=1");
+    expect(screen.getByText(/^Next$/i)).toBeInTheDocument();
   });
 
   it("renders queue items", () => {

@@ -55,7 +55,7 @@ jobs:
               -- "$file" >/tmp/cred-hits.txt 2>/dev/null; then
               while IFS= read -r hit; do
                 if echo "$hit" | grep -Eiq \
-                  'test-token|test-secret|dev-only-change-me|e2e-session-secret|example\.test|YOUR_PAPERLESS|SESSION_SECRET|DATABASE_PASSWORD|change-me|atlasdocs"|atlasdocs'\'''; then
+                  'test-token|test-secret|dev-only-change-me|e2e-session-secret|example\.test|YOUR_PAPERLESS|SESSION_SECRET=dev-only|DATABASE_PASSWORD=atlasdocs|change-me|atlasdocs"|atlasdocs'\'''; then
                   continue
                 fi
                 echo "::error file=$file::Possible hardcoded credential assignment"

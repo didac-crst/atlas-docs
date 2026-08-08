@@ -100,6 +100,11 @@ export function App() {
         </nav>
       </header>
       <main className="main">
+        {bootError && session ? (
+          <div className="banner banner-error" role="alert">
+            {bootError}
+          </div>
+        ) : null}
         <Routes>
           <Route
             path="/connect"

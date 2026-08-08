@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -714,22 +714,29 @@ class DocumentService:
     ) -> list[ConceptView]:
         auth = self._require_token(token)
         self._validate_paperless_token(auth)
+        if limit < 1:
+            raise ValidationError("limit must be >= 1")
         query = select(Concept).options(joinedload(Concept.ontology))
         if ontology_code:
             ontology = self._session.scalar(select(Ontology).where(Ontology.code == ontology_code))
             if ontology is None:
                 raise NotFoundError(f"Ontology '{ontology_code}' not found")
             query = query.where(Concept.ontology_id == ontology.id)
-        concepts = list(self._session.scalars(query).unique())
-        needle = q.strip().lower()
+        needle = q.strip()
         if needle:
-            concepts = [
-                item
-                for item in concepts
-                if needle in item.code.lower() or needle in item.name.lower()
-            ]
-        concepts.sort(key=lambda item: item.name)
-        return [ConceptView(code=item.code, name=item.name) for item in concepts[:limit]]
+            escaped = (
+                needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            pattern = f"%{escaped}%"
+            query = query.where(
+                or_(
+                    Concept.code.ilike(pattern, escape="\\"),
+                    Concept.name.ilike(pattern, escape="\\"),
+                )
+            )
+        query = query.order_by(Concept.name).limit(limit)
+        concepts = list(self._session.scalars(query).unique())
+        return [ConceptView(code=item.code, name=item.name) for item in concepts]
 
     def add_document_relationship(
         self,

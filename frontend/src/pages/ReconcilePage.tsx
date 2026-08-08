@@ -36,10 +36,18 @@ export function ReconcilePage({ session, onSession }: Props) {
       );
       setSummary(result);
       setNotice(result.dry_run ? "Dry-run complete" : "Reconciliation applied");
-      onSession(await getSession());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Reconcile failed");
     } finally {
+      try {
+        onSession(await getSession());
+      } catch {
+        setError((prev) =>
+          prev
+            ? `${prev}. Session refresh failed — reload before running again.`
+            : "Session refresh failed — reload before running again.",
+        );
+      }
       setBusy(false);
     }
   }
