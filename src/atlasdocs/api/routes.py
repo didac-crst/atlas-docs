@@ -1,12 +1,17 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from atlasdocs.api.schemas import (
+    BulkRelationshipResultResponse,
+    BulkRelationshipsRequest,
+    BulkRelationshipsResponse,
     ConceptResponse,
     CreateDocumentRelationshipRequest,
     CreateRelationshipRequest,
     DocumentResponse,
     EntityResponse,
+    IngestionJobResponse,
+    IngestionJobsResponse,
     ReconcileRequest,
     ReconcileResponse,
     RelationshipResponse,
@@ -26,6 +31,7 @@ from atlasdocs.services.documents import (
     UpstreamError,
     ValidationError,
 )
+from atlasdocs.services.ingest import DuplicateIngestError, IngestionService
 from atlasdocs.services.paperless import PaperlessClient
 from atlasdocs.services.reconcile import ReconcileService
 
@@ -54,6 +60,13 @@ def get_reconcile_service(
     return ReconcileService(session, paperless)
 
 
+def get_ingest_service(
+    session: Session = Depends(get_db),
+    paperless: PaperlessClient = Depends(get_paperless_client),
+) -> IngestionService:
+    return IngestionService(session, paperless)
+
+
 def require_authorization(authorization: str | None = Header(default=None)) -> str:
     if not authorization:
         raise HTTPException(
@@ -70,6 +83,11 @@ def _to_http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, ForbiddenDocumentError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    if isinstance(exc, DuplicateIngestError):
+        detail = str(exc)
+        if exc.paperless_document_id is not None:
+            detail = f"{detail}; paperless_document_id={exc.paperless_document_id}"
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
     if isinstance(exc, ConflictError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, ValidationError):
@@ -129,6 +147,21 @@ def _serialize_entity(entity) -> EntityResponse:
     )
 
 
+def _serialize_job(job) -> IngestionJobResponse:
+    return IngestionJobResponse(
+        id=job.id,
+        state=job.state,
+        created_at=job.created_at.isoformat(),
+        updated_at=job.updated_at.isoformat(),
+        paperless_document_id=job.paperless_document_id,
+        paperless_task_id=job.paperless_task_id,
+        error_code=job.error_code,
+        error_message=job.error_message,
+        original_filename=job.original_filename,
+        content_sha256=job.content_sha256,
+    )
+
+
 def _parse_origin_status(payload: CreateRelationshipRequest) -> tuple[RelationshipOrigin, RelationshipStatus]:
     origin = RelationshipOrigin.manual
     status_value = RelationshipStatus.confirmed
@@ -146,20 +179,34 @@ def _parse_origin_status(payload: CreateRelationshipRequest) -> tuple[Relationsh
 
 
 @router.get("/documents", response_model=UnclassifiedPageResponse)
-def list_unclassified_documents(
-    unclassified: bool = Query(default=False),
+def list_documents(
+    unclassified: bool | None = Query(default=None),
+    classification: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=UNCLASSIFIED_PAGE_SIZE, ge=1, le=UNCLASSIFIED_PAGE_SIZE),
     authorization: str = Depends(require_authorization),
     service: DocumentService = Depends(get_document_service),
 ) -> UnclassifiedPageResponse:
-    if not unclassified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only unclassified=true listing is supported",
-        )
+    if classification is None:
+        if unclassified is not True:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="classification or unclassified=true required",
+            )
+        classification = "unclassified"
     try:
-        result = service.list_unclassified(authorization, page=page, page_size=page_size)
+        result = service.list_documents(
+            authorization,
+            page=page,
+            page_size=page_size,
+            q=q,
+            classification=classification,
+            sort=sort,
+            order=order,
+        )
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
     return UnclassifiedPageResponse(
@@ -180,6 +227,76 @@ def list_unclassified_documents(
         has_previous=result.has_previous,
         next_page=result.next_page,
     )
+
+
+@router.post("/documents/bulk-relationships", response_model=BulkRelationshipsResponse)
+def bulk_document_relationships(
+    payload: BulkRelationshipsRequest,
+    authorization: str = Depends(require_authorization),
+    service: DocumentService = Depends(get_document_service),
+) -> BulkRelationshipsResponse:
+    try:
+        results = service.bulk_add_relationships(
+            payload.paperless_document_ids,
+            payload.relationship,
+            token=authorization,
+            target=payload.target,
+            target_entity_id=payload.target_entity_id,
+            target_paperless_id=payload.target_paperless_id,
+            strict=payload.strict,
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return BulkRelationshipsResponse(
+        results=[
+            BulkRelationshipResultResponse(
+                paperless_document_id=item.paperless_document_id,
+                status=item.status,
+                relationship_id=item.relationship_id,
+            )
+            for item in results
+        ]
+    )
+
+
+@router.post("/ingest", response_model=IngestionJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def ingest_document(
+    document: UploadFile = File(...),
+    authorization: str = Depends(require_authorization),
+    service: IngestionService = Depends(get_ingest_service),
+) -> IngestionJobResponse:
+    try:
+        job = service.enqueue(
+            authorization=authorization,
+            filename=document.filename or "upload.bin",
+            file_obj=document.file,
+            content_type=document.content_type or "application/octet-stream",
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _serialize_job(job)
+
+
+@router.get("/ingest/jobs", response_model=IngestionJobsResponse)
+def list_ingest_jobs(
+    authorization: str = Depends(require_authorization),
+    service: IngestionService = Depends(get_ingest_service),
+) -> IngestionJobsResponse:
+    return IngestionJobsResponse(
+        items=[_serialize_job(job) for job in service.list_jobs(authorization)]
+    )
+
+
+@router.get("/ingest/jobs/{job_id}", response_model=IngestionJobResponse)
+def get_ingest_job(
+    job_id: str,
+    authorization: str = Depends(require_authorization),
+    service: IngestionService = Depends(get_ingest_service),
+) -> IngestionJobResponse:
+    try:
+        return _serialize_job(service.get_job(job_id, authorization))
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
 
 
 @router.get("/documents/{paperless_document_id}", response_model=DocumentResponse)

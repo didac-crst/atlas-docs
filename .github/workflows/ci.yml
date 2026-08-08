@@ -57,7 +57,7 @@ jobs:
                 # Compare the quoted assignment value exactly — never substring-match the line.
                 value=$(printf '%s\n' "$hit" | sed -nE 's/.*[:=][[:space:]]*["'"'"']([^"'"'"']+)["'"'"'].*/\1/p')
                 case "$value" in
-                  test-token|test-secret|dev-only-change-me|e2e-session-secret|production-db-password|atlasdocs)
+                  test-token|test-secret|dev-only-change-me|e2e-session-secret|production-db-password|atlasdocs|dev-only-token-encryption-key|e2e-token-encryption-key|test-token-encryption-key|production-token-key|correct-horse)
                     continue
                     ;;
                 esac

@@ -6,12 +6,21 @@ from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
+from atlasdocs.security.tokens import DEFAULT_TOKEN_ENCRYPTION_KEY
+
 # Unclassified inbox: bounded Paperless pages, then one AtlasDocs filter per page.
 UNCLASSIFIED_PAGE_SIZE = 25
 UNCLASSIFIED_MAX_UPSTREAM_PAGES = 5
 DEFAULT_SESSION_SECRET = "dev-only-change-me"
 DEFAULT_DATABASE_PASSWORD = "atlasdocs"
 MAX_UI_SESSIONS = 1000
+DEFAULT_INGEST_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+DEFAULT_INGEST_MAX_ATTEMPTS = 3
+DEFAULT_INGEST_PROCESSING_TIMEOUT_SECONDS = 1800
+DEFAULT_INGEST_BULK_MAX_DOCUMENTS = 50
+DEFAULT_LOGIN_RATE_LIMIT_ATTEMPTS = 10
+DEFAULT_LOGIN_RATE_LIMIT_WINDOW_SECONDS = 600
+DEFAULT_INGEST_LEASE_SECONDS = 120
 
 
 class Settings(BaseSettings):
@@ -36,8 +45,16 @@ class Settings(BaseSettings):
     session_secure: bool = False
     session_max_age_seconds: int = 60 * 60 * 8
     session_cookie_name: str = "atlasdocs_sid"
+    token_encryption_key: str = DEFAULT_TOKEN_ENCRYPTION_KEY
     unclassified_page_size: int = UNCLASSIFIED_PAGE_SIZE
     unclassified_max_upstream_pages: int = UNCLASSIFIED_MAX_UPSTREAM_PAGES
+    ingest_max_upload_bytes: int = DEFAULT_INGEST_MAX_UPLOAD_BYTES
+    ingest_max_attempts: int = DEFAULT_INGEST_MAX_ATTEMPTS
+    ingest_processing_timeout_seconds: int = DEFAULT_INGEST_PROCESSING_TIMEOUT_SECONDS
+    ingest_bulk_max_documents: int = DEFAULT_INGEST_BULK_MAX_DOCUMENTS
+    ingest_lease_seconds: int = DEFAULT_INGEST_LEASE_SECONDS
+    login_rate_limit_attempts: int = DEFAULT_LOGIN_RATE_LIMIT_ATTEMPTS
+    login_rate_limit_window_seconds: int = DEFAULT_LOGIN_RATE_LIMIT_WINDOW_SECONDS
 
     @field_validator("atlasdocs_env")
     @classmethod
@@ -79,11 +96,23 @@ class Settings(BaseSettings):
         # Rebuild without query/fragment/credentials.
         return f"{parts.scheme}://{parts.netloc}{parts.path}".rstrip("/")
 
+    @field_validator("token_encryption_key")
+    @classmethod
+    def _strip_token_key(cls, value: str) -> str:
+        return value.strip()
+
     @field_validator("unclassified_max_upstream_pages")
     @classmethod
     def _positive_upstream_pages(cls, value: int) -> int:
         if value < 1:
             raise ValueError("UNCLASSIFIED_MAX_UPSTREAM_PAGES must be >= 1")
+        return value
+
+    @field_validator("ingest_max_upload_bytes", "ingest_max_attempts", "ingest_bulk_max_documents")
+    @classmethod
+    def _positive_ingest_ints(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("ingest limits must be >= 1")
         return value
 
     @model_validator(mode="after")
@@ -102,6 +131,14 @@ class Settings(BaseSettings):
             if not password or password == DEFAULT_DATABASE_PASSWORD:
                 raise ValueError(
                     "DATABASE_PASSWORD must be a non-empty, non-default value when "
+                    "ATLASDOCS_ENV=production"
+                )
+            if (
+                not self.token_encryption_key
+                or self.token_encryption_key == DEFAULT_TOKEN_ENCRYPTION_KEY
+            ):
+                raise ValueError(
+                    "TOKEN_ENCRYPTION_KEY must be a non-empty, non-default value when "
                     "ATLASDOCS_ENV=production"
                 )
         return self

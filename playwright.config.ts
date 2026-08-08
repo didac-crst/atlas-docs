@@ -17,7 +17,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `test -f src/atlasdocs/ui/spa/index.html || (cd frontend && npm run build); env ATLASDOCS_ENV=development SESSION_SECRET=e2e-session-secret SESSION_SECURE=false PYTHONPATH=src:. ${python} -m uvicorn tests.e2e_app:app --host 127.0.0.1 --port ${PORT}`,
+    command: `test -f src/atlasdocs/ui/spa/index.html || (cd frontend && npm run build); env ATLASDOCS_ENV=development SESSION_SECRET=e2e-session-secret TOKEN_ENCRYPTION_KEY=e2e-token-encryption-key SESSION_SECURE=false PYTHONPATH=src:. ${python} -m uvicorn tests.e2e_app:app --host 127.0.0.1 --port ${PORT}`,
     url: `${BASE}/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
@@ -25,11 +25,22 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } },
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 800 },
+        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } }
+          : {}),
+      },
     },
     {
       name: "mobile",
-      use: { ...devices["Pixel 7"] },
+      use: {
+        ...devices["Pixel 7"],
+        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } }
+          : {}),
+      },
     },
   ],
 });

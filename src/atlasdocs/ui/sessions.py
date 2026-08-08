@@ -1,127 +1,196 @@
-"""Server-side UI sessions: opaque cookie ID, secrets kept in process memory."""
+"""Durable PostgreSQL UI sessions (ADR 0002). Opaque cookie ID only in the browser."""
 
 from __future__ import annotations
 
-import secrets
-import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Request, Response
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from atlasdocs.config import MAX_UI_SESSIONS, get_settings
-
-COOKIE_NAME = "atlasdocs_sid"
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+from atlasdocs.db.models import UiSession as UiSessionRow
+from atlasdocs.db.models import utcnow
+from atlasdocs.security.tokens import (
+    decrypt_token,
+    encrypt_token,
+    new_csrf_token,
+    new_session_id,
+    token_fingerprint,
+)
 
 
 @dataclass
 class UiSession:
+    """Request-facing session view (authorization decrypted in memory only)."""
+
     id: str
     csrf_token: str
     expires_at: datetime
     paperless_authorization: str | None = None
+    token_fingerprint: str | None = None
+    username_label: str | None = None
 
     @property
     def authenticated(self) -> bool:
         return bool(self.paperless_authorization)
 
 
-class InMemorySessionStore:
-    """Process-local session store with explicit expiry, cap, and logout invalidation."""
+def _as_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
-    def __init__(self, max_sessions: int = MAX_UI_SESSIONS) -> None:
-        if max_sessions < 1:
-            raise ValueError("max_sessions must be >= 1")
-        self._lock = threading.Lock()
-        self._sessions: dict[str, UiSession] = {}
+
+class DbSessionStore:
+    """PostgreSQL-backed session store."""
+
+    def __init__(self, db: Session, *, max_sessions: int | None = None) -> None:
+        self._db = db
         self._max_sessions = max_sessions
 
-    def clear(self) -> None:
-        with self._lock:
-            self._sessions.clear()
+    def _settings_key(self) -> str:
+        return get_settings().token_encryption_key
 
-    def _purge_expired_locked(self) -> None:
-        now = _utcnow()
-        expired = [sid for sid, session in self._sessions.items() if session.expires_at <= now]
-        for sid in expired:
-            self._sessions.pop(sid, None)
+    def _purge_expired(self) -> None:
+        now = utcnow()
+        rows = list(self._db.scalars(select(UiSessionRow)).all())
+        for row in rows:
+            if _as_aware(row.expires_at) <= now:
+                self._db.delete(row)
+        self._db.flush()
 
-    def _enforce_cap_locked(self) -> None:
-        while len(self._sessions) >= self._max_sessions:
-            oldest = min(self._sessions.values(), key=lambda item: item.expires_at)
-            self._sessions.pop(oldest.id, None)
-
-    def create(self, *, paperless_authorization: str | None = None) -> UiSession:
-        settings = get_settings()
-        session = UiSession(
-            id=secrets.token_urlsafe(32),
-            csrf_token=secrets.token_urlsafe(32),
-            paperless_authorization=paperless_authorization,
-            expires_at=_utcnow() + timedelta(seconds=settings.session_max_age_seconds),
+    def _enforce_cap(self, *, max_sessions: int | None = None) -> None:
+        cap = max_sessions if max_sessions is not None else (
+            self._max_sessions if self._max_sessions is not None else MAX_UI_SESSIONS
         )
-        with self._lock:
-            self._purge_expired_locked()
-            self._enforce_cap_locked()
-            self._sessions[session.id] = session
-        return session
+        if cap < 1:
+            raise ValueError("max_sessions must be >= 1")
+        rows = list(
+            self._db.scalars(select(UiSessionRow).order_by(UiSessionRow.expires_at.asc())).all()
+        )
+        while len(rows) >= cap:
+            oldest = rows.pop(0)
+            self._db.delete(oldest)
+        self._db.flush()
+
+    def _to_view(self, row: UiSessionRow) -> UiSession:
+        auth: str | None = None
+        if row.paperless_authorization_ciphertext:
+            auth = decrypt_token(
+                row.paperless_authorization_ciphertext, key=self._settings_key()
+            )
+        return UiSession(
+            id=row.id,
+            csrf_token=row.csrf_token,
+            expires_at=row.expires_at,
+            paperless_authorization=auth,
+            token_fingerprint=row.token_fingerprint,
+            username_label=row.username_label,
+        )
+
+    def create(
+        self,
+        *,
+        paperless_authorization: str | None = None,
+        username_label: str | None = None,
+    ) -> UiSession:
+        settings = get_settings()
+        self._purge_expired()
+        self._enforce_cap()
+        ciphertext = None
+        fingerprint = None
+        if paperless_authorization:
+            ciphertext = encrypt_token(paperless_authorization, key=self._settings_key())
+            fingerprint = token_fingerprint(paperless_authorization)
+        row = UiSessionRow(
+            id=new_session_id(),
+            csrf_token=new_csrf_token(),
+            expires_at=utcnow() + timedelta(seconds=settings.session_max_age_seconds),
+            paperless_authorization_ciphertext=ciphertext,
+            token_fingerprint=fingerprint,
+            username_label=username_label,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        self._db.add(row)
+        self._db.flush()
+        return self._to_view(row)
 
     def get(self, session_id: str | None) -> UiSession | None:
         if not session_id:
             return None
-        with self._lock:
-            self._purge_expired_locked()
-            session = self._sessions.get(session_id)
-            if session is None:
-                return None
-            if session.expires_at <= _utcnow():
-                self._sessions.pop(session_id, None)
-                return None
-            return session
+        self._purge_expired()
+        row = self._db.get(UiSessionRow, session_id)
+        if row is None:
+            return None
+        if _as_aware(row.expires_at) <= utcnow():
+            self._db.delete(row)
+            self._db.flush()
+            return None
+        return self._to_view(row)
 
     def save(self, session: UiSession) -> bool:
-        """Update an existing session only. Returns False if the ID is unknown/deleted."""
-        with self._lock:
-            self._purge_expired_locked()
-            if session.id not in self._sessions:
-                return False
-            self._sessions[session.id] = session
-            return True
+        row = self._db.get(UiSessionRow, session.id)
+        if row is None:
+            return False
+        row.csrf_token = session.csrf_token
+        row.expires_at = session.expires_at
+        row.username_label = session.username_label
+        row.updated_at = utcnow()
+        if session.paperless_authorization:
+            row.paperless_authorization_ciphertext = encrypt_token(
+                session.paperless_authorization, key=self._settings_key()
+            )
+            row.token_fingerprint = token_fingerprint(session.paperless_authorization)
+        else:
+            row.paperless_authorization_ciphertext = None
+            row.token_fingerprint = None
+        self._db.flush()
+        return True
 
     def delete(self, session_id: str | None) -> None:
         if not session_id:
             return
-        with self._lock:
-            self._sessions.pop(session_id, None)
+        row = self._db.get(UiSessionRow, session_id)
+        if row is not None:
+            self._db.delete(row)
+            self._db.flush()
 
     def rotate_csrf(self, session: UiSession) -> bool:
-        session.csrf_token = secrets.token_urlsafe(32)
+        session.csrf_token = new_csrf_token()
         return self.save(session)
 
-    def __len__(self) -> int:
-        with self._lock:
-            return len(self._sessions)
+    def clear(self) -> None:
+        self._db.execute(delete(UiSessionRow))
+        self._db.flush()
 
 
-session_store = InMemorySessionStore()
+class _NoopSessionStore:
+    """Compat for tests that still call session_store.clear() before DB setup."""
+
+    def clear(self) -> None:
+        return None
+
+
+session_store = _NoopSessionStore()
 
 
 def read_session_id(request: Request) -> str | None:
     return request.cookies.get(get_settings().session_cookie_name)
 
 
-def get_request_session(request: Request) -> UiSession | None:
-    return session_store.get(read_session_id(request))
+def get_request_session(request: Request, db: Session) -> UiSession | None:
+    return DbSessionStore(db).get(read_session_id(request))
 
 
-def ensure_session(request: Request) -> UiSession:
-    existing = get_request_session(request)
+def ensure_session(request: Request, db: Session) -> UiSession:
+    store = DbSessionStore(db)
+    existing = store.get(read_session_id(request))
     if existing is not None:
         return existing
-    return session_store.create()
+    return store.create()
 
 
 def set_session_cookie(response: Response, session: UiSession) -> None:

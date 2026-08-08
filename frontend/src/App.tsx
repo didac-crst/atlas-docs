@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { ApiError, disconnect, getSession, type SessionInfo } from "./api/client";
 import { ConnectPage } from "./pages/ConnectPage";
+import { HomePage } from "./pages/HomePage";
+import { IngestPage } from "./pages/IngestPage";
 import { ReconcilePage } from "./pages/ReconcilePage";
 import { WorkbenchPage } from "./pages/WorkbenchPage";
 import markUrl from "./assets/atlas-docs-mark.svg";
@@ -68,6 +70,7 @@ export function App() {
   }
 
   const authenticated = Boolean(session?.authenticated);
+  const path = location.pathname;
 
   return (
     <div className="app-shell">
@@ -79,12 +82,24 @@ export function App() {
         <nav className="site-nav" aria-label="Primary">
           {authenticated ? (
             <>
-              <Link to="/" aria-current={location.pathname === "/" ? "page" : undefined}>
+              <Link to="/" aria-current={path === "/" ? "page" : undefined}>
+                Home
+              </Link>
+              <Link
+                to="/classify"
+                aria-current={path.startsWith("/classify") || path.startsWith("/documents") ? "page" : undefined}
+              >
                 Classify
               </Link>
               <Link
+                to="/ingest"
+                aria-current={path.startsWith("/ingest") ? "page" : undefined}
+              >
+                Ingest
+              </Link>
+              <Link
                 to="/reconcile"
-                aria-current={location.pathname.startsWith("/reconcile") ? "page" : undefined}
+                aria-current={path.startsWith("/reconcile") ? "page" : undefined}
               >
                 Reconcile
               </Link>
@@ -109,17 +124,13 @@ export function App() {
           <Route
             path="/connect"
             element={
-              authenticated ? (
-                <Navigate to="/" replace />
-              ) : (
-                <ConnectPage
-                  session={session}
-                  onConnected={async () => {
-                    await refreshSession();
-                    navigate("/");
-                  }}
-                />
-              )
+              <ConnectPage
+                session={session}
+                onConnected={async () => {
+                  await refreshSession();
+                  navigate("/");
+                }}
+              />
             }
           />
           <Route
@@ -127,6 +138,26 @@ export function App() {
             element={
               authenticated && session ? (
                 <ReconcilePage session={session} onSession={setSession} />
+              ) : (
+                <Navigate to="/connect" replace />
+              )
+            }
+          />
+          <Route
+            path="/ingest"
+            element={
+              authenticated && session ? (
+                <IngestPage session={session} onSession={setSession} />
+              ) : (
+                <Navigate to="/connect" replace />
+              )
+            }
+          />
+          <Route
+            path="/classify"
+            element={
+              authenticated && session ? (
+                <WorkbenchPage session={session} onSession={setSession} />
               ) : (
                 <Navigate to="/connect" replace />
               )
@@ -146,7 +177,7 @@ export function App() {
             path="/"
             element={
               authenticated && session ? (
-                <WorkbenchPage session={session} onSession={setSession} />
+                <HomePage />
               ) : (
                 <Navigate to="/connect" replace />
               )

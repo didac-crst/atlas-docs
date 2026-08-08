@@ -37,5 +37,9 @@ Workflow: `.github/workflows/ci.yml`.
 - Fixtures use obvious development values (`test-secret`,
   `production-db-password`, …). The hygiene allowlist matches **exact** quoted
   credential values, not substrings of the line.
-- E2E asserts the Paperless token never lands in `localStorage` /
-  `sessionStorage`.
+- E2E asserts passwords and Paperless tokens never land in `localStorage` /
+  `sessionStorage` or visible page text.
+- Contract tests pin FakePaperless shapes for `/api/token/`, `post_document`,
+  and tasks before worker behavior is trusted.
+- Ingest tests cover duplicate checksum (409), Paperless duplicate → FAILED,
+  ciphertext wipe on READY/FAILED, and stale lease reclaim.

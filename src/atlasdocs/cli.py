@@ -9,6 +9,7 @@ import sys
 
 from atlasdocs.config import get_settings
 from atlasdocs.db.session import get_engine, get_session_factory
+from atlasdocs.services.ingest import IngestionWorker
 from atlasdocs.services.paperless import PaperlessClient
 from atlasdocs.services.reconcile import ReconcileService
 
@@ -47,6 +48,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Emit machine-readable JSON summary on stdout",
+    )
+
+    worker = sub.add_parser("worker", help="Background workers")
+    worker_sub = worker.add_subparsers(dest="worker_command", required=True)
+    ingest = worker_sub.add_parser("ingest", help="Process durable ingestion jobs")
+    ingest.add_argument(
+        "--once",
+        action="store_true",
+        help="Process at most one job and exit",
+    )
+    ingest.add_argument(
+        "--idle-sleep",
+        type=float,
+        default=1.0,
+        help="Seconds to sleep when the queue is empty (default 1)",
     )
     return parser
 
@@ -112,11 +128,44 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     return 1 if summary.errors else 0
 
 
+def cmd_worker_ingest(args: argparse.Namespace) -> int:
+    settings = get_settings()
+    get_engine()
+    paperless = PaperlessClient(
+        base_url=settings.paperless_base_url,
+        timeout_seconds=settings.paperless_timeout_seconds,
+    )
+    if args.once:
+        session = get_session_factory()()
+        try:
+            worker = IngestionWorker(session, paperless)
+            worker.run_once()
+            return 0
+        finally:
+            session.close()
+
+    while True:
+        session = get_session_factory()()
+        try:
+            worker = IngestionWorker(session, paperless)
+            worked = worker.run_once()
+        finally:
+            session.close()
+        if not worked:
+            import time
+
+            time.sleep(args.idle_sleep)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command == "reconcile":
         raise SystemExit(cmd_reconcile(args))
+    if args.command == "worker":
+        if args.worker_command == "ingest":
+            raise SystemExit(cmd_worker_ingest(args))
     parser.error(f"Unknown command {args.command}")
 
 

@@ -5,10 +5,13 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     DateTime,
     Enum,
     ForeignKey,
+    Integer,
     String,
+    Text,
     UniqueConstraint,
     Uuid,
 )
@@ -17,6 +20,13 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def as_aware(value: datetime) -> datetime:
+    """Normalize SQLite-naive timestamps for comparison with aware utcnow()."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -46,6 +56,13 @@ class RelationshipStatus(str, enum.Enum):
     confirmed = "confirmed"
 
 
+class IngestionJobState(str, enum.Enum):
+    uploading = "UPLOADING"
+    processing = "PROCESSING"
+    ready = "READY"
+    failed = "FAILED"
+
+
 ENTITY_TYPE_ENUM = Enum(
     EntityType,
     name="entity_type",
@@ -70,6 +87,13 @@ ORIGIN_ENUM = Enum(
 STATUS_ENUM = Enum(
     RelationshipStatus,
     name="relationship_status",
+    values_callable=lambda obj: [e.value for e in obj],
+    native_enum=False,
+    length=32,
+)
+INGESTION_STATE_ENUM = Enum(
+    IngestionJobState,
+    name="ingestion_job_state",
     values_callable=lambda obj: [e.value for e in obj],
     native_enum=False,
     length=32,
@@ -220,3 +244,47 @@ class Relationship(Base):
         foreign_keys=[target_entity_id],
     )
     relationship_type: Mapped[RelationshipType] = relationship()
+
+
+class UiSession(Base):
+    __tablename__ = "ui_sessions"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    csrf_token: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    paperless_authorization_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    username_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    @property
+    def authenticated(self) -> bool:
+        return bool(self.paperless_authorization_ciphertext)
+
+
+class IngestionJob(Base):
+    __tablename__ = "ingestion_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    state: Mapped[IngestionJobState] = mapped_column(INGESTION_STATE_ENUM, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_by_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    token_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    paperless_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    paperless_document_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    locked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("entities.id", ondelete="SET NULL"), nullable=True
+    )

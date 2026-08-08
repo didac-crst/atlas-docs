@@ -42,6 +42,20 @@ export type QueuePage = {
   next_page: number | null;
 };
 
+export type ClassificationFilter = "unclassified" | "classified" | "any";
+export type DocumentSort = "created" | "title";
+export type SortOrder = "asc" | "desc";
+
+export type DocumentListParams = {
+  page?: number;
+  q?: string;
+  classification?: ClassificationFilter;
+  sort?: DocumentSort;
+  order?: SortOrder;
+  /** Legacy flag when `classification` is omitted. */
+  unclassified?: boolean;
+};
+
 export type RelationshipType = {
   code: string;
   name: string;
@@ -65,6 +79,51 @@ export type ReconcileSummary = {
   inaccessible_in_paperless: number[];
   errors: string[];
   human_summary: string;
+};
+
+export type IngestJobState = "UPLOADING" | "PROCESSING" | "READY" | "FAILED";
+
+export type IngestJob = {
+  id: string;
+  state: IngestJobState;
+  created_at: string;
+  updated_at: string;
+  paperless_document_id: number | null;
+  paperless_task_id: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  original_filename: string | null;
+  content_sha256: string | null;
+};
+
+export type IngestJobsPage = {
+  items: IngestJob[];
+};
+
+export type BulkRelationshipStatus =
+  | "created"
+  | "skipped_duplicate"
+  | "forbidden_or_missing"
+  | "validation_error";
+
+export type BulkRelationshipResult = {
+  paperless_document_id: number;
+  status: BulkRelationshipStatus;
+  relationship_id?: string;
+};
+
+export type BulkRelationshipsResponse = {
+  results: BulkRelationshipResult[];
+};
+
+export type BulkRelationshipsBody = {
+  paperless_document_ids: number[];
+  relationship: string;
+  target?: string;
+  target_entity_id?: string;
+  target_paperless_id?: number;
+  strict?: boolean;
+  csrf_token: string;
 };
 
 export class ApiError extends Error {
@@ -95,7 +154,8 @@ export async function apiFetch<T>(
   csrfToken?: string,
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) {
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+  if (init.body && !isFormData && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   if (csrfToken) {
@@ -115,8 +175,36 @@ export async function apiFetch<T>(
   return (await response.json()) as T;
 }
 
+/** Build query string for GET /ui/api/documents. */
+export function buildDocumentsQuery(params: DocumentListParams = {}): string {
+  const search = new URLSearchParams();
+  const page = params.page ?? 1;
+  if (page !== 1) search.set("page", String(page));
+  else search.set("page", String(page));
+
+  if (params.q?.trim()) search.set("q", params.q.trim());
+
+  if (params.classification) {
+    search.set("classification", params.classification);
+  } else if (params.unclassified) {
+    search.set("unclassified", "true");
+  }
+
+  if (params.sort) search.set("sort", params.sort);
+  if (params.order) search.set("order", params.order);
+
+  return search.toString();
+}
+
 export function getSession() {
   return apiFetch<SessionInfo>("/ui/api/session");
+}
+
+export function login(username: string, password: string, csrfToken: string) {
+  return apiFetch<SessionInfo>("/ui/api/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password, csrf_token: csrfToken }),
+  });
 }
 
 export function connect(paperlessToken: string, csrfToken: string) {
@@ -137,8 +225,14 @@ export function disconnect(csrfToken: string) {
   );
 }
 
+export function fetchDocuments(params: DocumentListParams = {}) {
+  const query = buildDocumentsQuery(params);
+  return apiFetch<QueuePage>(`/ui/api/documents?${query}`);
+}
+
+/** Legacy helper: unclassified queue page. Prefer `fetchDocuments`. */
 export function fetchQueue(page = 1) {
-  return apiFetch<QueuePage>(`/ui/api/documents?unclassified=true&page=${page}`);
+  return fetchDocuments({ page, unclassified: true });
 }
 
 export function fetchDocument(id: number) {
@@ -174,12 +268,44 @@ export function addRelationship(
   );
 }
 
+export function bulkAddRelationships(body: BulkRelationshipsBody, csrfToken: string) {
+  return apiFetch<BulkRelationshipsResponse>(
+    "/ui/api/documents/bulk-relationships",
+    { method: "POST", body: JSON.stringify(body) },
+    csrfToken,
+  );
+}
+
 export function removeRelationship(relationshipId: string, csrfToken: string) {
   return apiFetch<void>(
     `/ui/api/relationships/${relationshipId}`,
     { method: "DELETE" },
     csrfToken,
   );
+}
+
+export function ingestDocument(file: File, title: string | undefined, csrfToken: string) {
+  const form = new FormData();
+  form.append("document", file);
+  if (title?.trim()) {
+    form.append("title", title.trim());
+  }
+  return apiFetch<IngestJob>(
+    "/ui/api/ingest",
+    {
+      method: "POST",
+      body: form,
+    },
+    csrfToken,
+  );
+}
+
+export function fetchIngestJobs() {
+  return apiFetch<IngestJobsPage>("/ui/api/ingest/jobs");
+}
+
+export function fetchIngestJob(id: string) {
+  return apiFetch<IngestJob>(`/ui/api/ingest/jobs/${id}`);
 }
 
 export function runReconcile(body: { dry_run: boolean; limit?: number | null }, csrfToken: string) {
@@ -198,4 +324,26 @@ export function filterConcepts(concepts: Concept[], query: string): Concept[] {
     (item) =>
       item.code.toLowerCase().includes(needle) || item.name.toLowerCase().includes(needle),
   );
+}
+
+export function summarizeBulkResults(results: BulkRelationshipResult[]): string {
+  const counts: Record<BulkRelationshipStatus, number> = {
+    created: 0,
+    skipped_duplicate: 0,
+    forbidden_or_missing: 0,
+    validation_error: 0,
+  };
+  for (const item of results) {
+    counts[item.status] += 1;
+  }
+  const parts: string[] = [];
+  if (counts.created) parts.push(`${counts.created} created`);
+  if (counts.skipped_duplicate) parts.push(`${counts.skipped_duplicate} skipped`);
+  if (counts.forbidden_or_missing) parts.push(`${counts.forbidden_or_missing} forbidden/missing`);
+  if (counts.validation_error) parts.push(`${counts.validation_error} validation error`);
+  return parts.length ? parts.join(" · ") : "No results";
+}
+
+export function jobNeedsPolling(job: Pick<IngestJob, "state">): boolean {
+  return job.state === "UPLOADING" || job.state === "PROCESSING";
 }
