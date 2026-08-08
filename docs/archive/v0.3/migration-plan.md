@@ -1,3 +1,7 @@
+> **Historical document.** This file is archived and does not describe current AtlasDocs behavior.
+> Read [../../adr/0001-entity-external-reference.md](../../adr/0001-entity-external-reference.md) instead.
+> Implemented Alembic expand/backfill plan; decision recorded as ADR 0001.
+
 # AtlasDocs v0.3 Schema Migration Plan
 
 Approved for implementation with the v0.3 milestone. Single Alembic revision

@@ -1,3 +1,7 @@
+> **Historical document.** This file is archived and does not describe current AtlasDocs behavior.
+> Read [../../architecture.md](../../architecture.md) instead.
+> v0.3 Entity + ExternalReference planning; schema delivered.
+
 # AtlasDocs v0.3 Roadmap — Entity + ExternalReference Core
 
 ## Status

@@ -4,101 +4,119 @@
   <img src="assets/atlas-docs-wordmark.svg" alt="AtlasDocs" width="480">
 </p>
 
-AtlasDocs is a reusable semantic document layer built on top of Paperless-ngx.
+<p align="center">
+  <a href="https://github.com/didac-crst/atlas-docs/actions/workflows/ci.yml"><img src="https://github.com/didac-crst/atlas-docs/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/didac-crst/atlas-docs/pkgs/container/atlasdocs"><img src="https://img.shields.io/badge/GHCR-atlasdocs-0d6cb6?logo=github" alt="GHCR"></a>
+  <img src="https://img.shields.io/badge/Paperless--ngx-companion-08afc6" alt="Paperless companion">
+  <img src="https://img.shields.io/badge/stack-FastAPI_%7C_React_%7C_Postgres-102644" alt="Stack">
+</p>
 
-AtlasDocs adds entities, concepts, typed relationships, provenance, and classification workflows while Paperless-ngx remains authoritative for document storage, OCR, search, previews, and document authorization.
+<p align="center">
+  <strong>Paperless stores the documents. AtlasDocs stores the meaning.</strong>
+</p>
 
-This repository is the public product. It must be deployable independently of Satellite, NAS layouts, Cloudflare, Bitwarden, Raspberry Pi hardware, or any personal infrastructure.
+<p align="center">
+  Typed entities · relationships · provenance · classification<br/>
+  on top of <a href="https://docs.paperless-ngx.com/">Paperless-ngx</a> — without replacing it.
+</p>
 
-## Status
+## Why
 
-v0.4 adds a general entity relationship API, Paperless reconciliation
-(`atlasdocs reconcile` / `/ui/reconcile`), and a React classification workbench
-on the v0.3 Entity + ExternalReference core.
+Paperless-ngx nails ingest, OCR, search, previews, and permissions. Tags help, but they don’t answer:
 
-See `docs/v0.4-semantic-workbench.md`, `docs/frontend-architecture.md`,
-`docs/reconciliation.md`, `docs/architecture-assessment.md`, and
-`docs/v0.3-roadmap.md`.
+> What *is* this document, and how does it connect to everything else?
 
-## Quick start (development)
+That gap shows up fast in a real archive (taxes, employment, housing, correspondence):
+
+- Meaning lives in your head, not in the system
+- Tags are flat — no direction, inverses, or provenance
+- Forking Paperless to add semantics couples two hard problems
+- Stuffing a knowledge model into Paperless’s DB fights upgrades and ownership
+
+AtlasDocs keeps Paperless as the document system of record and adds a **semantic layer beside it**.
+
+## How
+
+| Concern | Owner |
+| --- | --- |
+| Files, OCR, search, previews, ACLs, lifecycle | **Paperless** |
+| Entities, concepts, typed relationships, classification | **AtlasDocs** |
+
+- **REST only** — no Paperless DB, no filesystem mounts, no embedded viewer
+- **AtlasDocs UUIDs** — Paperless ids bind via `ExternalReference(system=paperless)`
+- **Entity ↔ entity edges** — concepts *and* document↔document links, with origin + status
+- **Auth follows Paperless** — your token; denial → not found; no semantic leaks
+- **Reconcile without amnesia** — create missing bindings, report orphans, **never** auto-delete
+- **Workbench, not a second archive** — React UI under `/ui`; tokens stay server-side (HttpOnly + CSRF)
+
+```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif,system-ui,sans-serif","primaryColor":"#eaf8fb","primaryTextColor":"#102644","primaryBorderColor":"#08afc6","secondaryColor":"#102644","secondaryTextColor":"#eaf8fb","secondaryBorderColor":"#0d6cb6","tertiaryColor":"#f1f5f9","lineColor":"#3a4ccd","textColor":"#102644","mainBkg":"#f7f9fc","clusterBkg":"#ffffff","clusterBorder":"#a8eaf2","titleColor":"#102644","edgeLabelBackground":"#ffffff"}}}%%
+flowchart LR
+  You((You))
+  subgraph paperless [Document_authority]
+    Store["Paperless-ngx<br/>OCR · search · ACLs · files"]
+  end
+  subgraph atlas [Semantic_layer]
+    Sem["AtlasDocs<br/>entities · relationships · provenance"]
+  end
+  You -->|"ingest / view / search"| Store
+  You -->|"classify / relate"| Sem
+  Sem -->|"REST + your token"| Store
+  classDef you fill:#3a4ccd,stroke:#102644,color:#ffffff
+  classDef pl fill:#102644,stroke:#0d6cb6,color:#eaf8fb
+  classDef ad fill:#08afc6,stroke:#0d6cb6,color:#102644
+  class You you
+  class Store pl
+  class Sem ad
+```
+
+## What’s in v0.4
+
+- Entity + ExternalReference core (PostgreSQL / Alembic)
+- JSON API — documents, entities, relationships, ontologies, reconcile
+- `atlasdocs reconcile` + `POST /reconcile` (dry-run, limits)
+- React + TypeScript + Vite classification workbench
+- Version-controlled seed ontologies and relationship types
+
+**Not yet:** LLMs, embeddings, graph-first UI, native notes, auto-delete. See the [roadmap](docs/roadmap.md).
+
+## Docs
+
+| | |
+| --- | --- |
+| [Architecture](docs/architecture.md) | Model, ownership, boundaries |
+| [Frontend](docs/frontend.md) | SPA, BFF, auth, brand |
+| [API](docs/api.md) | JSON + `/ui/api` surfaces |
+| [Paperless](docs/paperless-integration.md) | REST rules, `BASE` vs `PUBLIC` URL |
+| [Reconciliation](docs/reconciliation.md) | Safety + CLI/HTTP |
+| [Development](docs/development.md) | Setup, env, layout |
+| [Testing](docs/testing.md) | Pytest, Vitest, Playwright, CI |
+| [Roadmap](docs/roadmap.md) | Next + deferred |
+| [ADRs](docs/adr/) · [Archive](docs/archive/) | Decisions · history |
+
+## Quick start
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-
-# API/BFF tests use SQLite and a mocked Paperless client
 pytest
 
-# Frontend unit tests + SPA build (copies into src/atlasdocs/ui/spa)
 cd frontend && npm install && npm test && npm run build && cd ..
-
-# Playwright smoke (desktop + mobile) against mocked Paperless
-npm install && npx playwright install chromium
-npm run test:e2e
-
-# Full stack with PostgreSQL
 docker compose up --build
 ```
 
-Open the workbench at `http://localhost:8080/ui` and paste a Paperless API token. The token is stored server-side; the browser only keeps an opaque HttpOnly session cookie.
+Open **http://localhost:8080/ui**, paste a Paperless token, classify.
+Token stays on the server; the browser only gets an opaque HttpOnly session.
 
-Example JSON API:
-
-```bash
-curl -X POST http://localhost:8080/documents/184/relationships \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Token YOUR_PAPERLESS_TOKEN' \
-  -d '{"relationship":"source-country","target":"Germany"}'
-
-curl 'http://localhost:8080/documents?unclassified=true&page=1&page_size=25' \
-  -H 'Authorization: Token YOUR_PAPERLESS_TOKEN'
-```
-
-## Layout
-
-- `src/atlasdocs/` — FastAPI service, domain model, Paperless REST client, UI BFF + SPA assets
-- `frontend/` — React + TypeScript + Vite workbench
-- `e2e/` — Playwright smoke tests
-- `config/seed/` — version-controlled ontology seed data
-- `alembic/` — reproducible PostgreSQL migrations
-- `docs/` — product architecture and roadmap
-- `.github/workflows/ci.yml` — pytest, frontend, Playwright, container build, gated GHCR publish
-- `migration/`, `semantic/` — reserved future boundaries
-
-## Configuration
-
-Environment variables:
-
-| Variable | Meaning |
+| Env | Role |
 | --- | --- |
-| `DATABASE_HOST` | PostgreSQL host (default `db`) |
-| `DATABASE_PORT` | PostgreSQL port (default `5432`) |
-| `DATABASE_NAME` | Database name (default `atlasdocs`) |
-| `DATABASE_USER` | Database user (default `atlasdocs`) |
-| `DATABASE_PASSWORD` | Database password (default `atlasdocs`; must be non-default in production) |
-| `PAPERLESS_BASE_URL` | Paperless origin for **server-to-server REST** (may be an internal Docker hostname) |
-| `PAPERLESS_PUBLIC_URL` | Optional browser-facing Paperless origin for **Open in Paperless** links. Never falls back to `PAPERLESS_BASE_URL`. When unset, the action is hidden/disabled. |
-| `PAPERLESS_TIMEOUT_SECONDS` | Upstream timeout |
-| `ATLASDOCS_ENV` | **Required.** `development` or `production` (no silent default) |
-| `SESSION_SECRET` | Required non-default secret in production |
-| `SESSION_SECURE` | Set cookie `Secure` (required true in production) |
-| `SESSION_MAX_AGE_SECONDS` | Server-side session expiry (default 8 hours) |
-| `SEED_PATH` | Seed YAML path |
+| `PAPERLESS_BASE_URL` | Server → Paperless REST (can be internal) |
+| `PAPERLESS_PUBLIC_URL` | Browser “Open in Paperless” only — **never** falls back to `BASE` |
 
-The SQLAlchemy URL is built at runtime with `URL.create()` from the split `DATABASE_*` settings so passwords with special characters are escaped safely. Production should not rely on a single `DATABASE_URL` with embedded credentials. Production also rejects the default `DATABASE_PASSWORD` and default `SESSION_SECRET`.
+Full config: [docs/development.md](docs/development.md).
 
-`ATLASDOCS_ENV` must be set explicitly. Omitting it fails startup instead of falling back to development defaults.
+---
 
-The UI keeps Paperless tokens in a server-side session. The browser only receives an opaque HttpOnly session id (`SameSite=Lax`). Document JSON endpoints require an `Authorization` header on every request and forward it to Paperless. There is no service-token fallback for document access. When Paperless denies access, AtlasDocs returns 404 and does not disclose document-derived semantics.
+Public product. Deploy anywhere. No private-infra assumptions baked in.
 
-Unclassified listing fetches one Paperless page (`page_size` default/max 25) and filters with a single AtlasDocs query for confirmed relationships.
-
-Duplicate relationships for the same document, type, and target are rejected with HTTP 409. Browser mutations use CSRF-protected BFF calls (`X-CSRF-Token`).
-
-The private Satellite deployment lives separately in `satlas-docs` and consumes AtlasDocs through a pinned release or container image.
-
-## Brand assets
-
-- `assets/atlas-docs-wordmark.svg` — README and full-width product identity.
-- `assets/atlas-docs-mark.svg` — compact icon, favicon, and app-icon contexts.
+Brand: [`assets/atlas-docs-wordmark.svg`](assets/atlas-docs-wordmark.svg) · [`assets/atlas-docs-mark.svg`](assets/atlas-docs-mark.svg)

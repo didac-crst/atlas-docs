@@ -7,12 +7,18 @@ semantic knowledge.
 
 Reconciliation:
 
-1. Lists Paperless documents through the REST API (paginated).
+1. Lists Paperless documents through the REST API (paginated; optional `limit`).
 2. Creates missing AtlasDocs `Entity(type=document)` rows and
    `ExternalReference(system=paperless, external_id=…)`.
-3. Scans existing Paperless external references and reports documents that are
-   missing (404) or inaccessible (401/403) to the supplied token.
-4. **Never deletes** relationships, entities, or external references.
+3. Treats documents returned by the listing scan as already verified for that
+   run (no redundant per-id GET).
+4. On a **full** run (`limit` unset), GETs AtlasDocs Paperless references that
+   were **not** seen in the listing and reports missing (404) or inaccessible
+   (401/403) ids.
+5. **Never deletes** relationships, entities, or external references.
+
+Limited runs (`limit` set) focus on create/scan; orphan verification is deferred
+to a full pass.
 
 ## Safety rule
 
@@ -22,14 +28,14 @@ Automatic deletion is forbidden. Operators must inspect
 ## Service abstraction
 
 `atlasdocs.services.reconcile.ReconcileService` is the reusable entry point for
-the CLI, `POST /reconcile`, and the `/ui/reconcile` form. Future webhooks should
+the CLI, `POST /reconcile`, and the UI reconcile page. Future webhooks should
 call the same service.
 
 ## CLI
 
 ```bash
-# Required: database settings + Paperless base URL via env (see README).
-# Token via PAPERLESS_TOKEN or --token.
+# Required: database settings + Paperless base URL via env
+# (see development.md). Token via PAPERLESS_TOKEN or --token.
 
 atlasdocs reconcile --dry-run
 atlasdocs reconcile --limit 50
@@ -48,6 +54,8 @@ Content-Type: application/json
 {"dry_run": true, "limit": 100}
 ```
 
+UI equivalent: `POST /ui/api/reconcile` (session + CSRF).
+
 Returns machine-readable lists plus `human_summary`.
 
 ## Authorization boundary
@@ -63,4 +71,5 @@ Running reconcile repeatedly does not create duplicate external references
 
 ## Deferred
 
-Background workers, webhooks, automatic cleanup, and Satlas-specific scheduling.
+Background workers, webhooks, automatic cleanup, and private-deployment
+scheduling hooks. See [roadmap.md](roadmap.md).

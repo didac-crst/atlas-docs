@@ -1,3 +1,7 @@
+> **Historical document.** This file is archived and does not describe current AtlasDocs behavior.
+> Read [../../frontend.md](../../frontend.md) instead.
+> Approved React replacement of Jinja; now historical.
+
 # AtlasDocs v0.4 React UI Proposal
 
 ## Status

@@ -1,12 +1,18 @@
 {
   "name": "atlasdocs-e2e",
   "private": true,
+  "type": "module",
   "devDependencies": {
     "@playwright/test": "1.52.0",
+    "jsdom": "^26.1.0",
+    "mermaid": "^10.9.3",
     "typescript": "^5.8.3"
   },
   "scripts": {
     "test:e2e": "playwright test",
-    "test:e2e:install": "playwright install chromium"
+    "test:e2e:install": "playwright install chromium",
+    "check:mermaid": "node scripts/check_mermaid.mjs",
+    "check:doc-links": "node scripts/check_doc_links.mjs",
+    "check:docs": "npm run check:mermaid && npm run check:doc-links"
   }
 }

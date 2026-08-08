@@ -1,3 +1,7 @@
+> **Historical document.** This file is archived and does not describe current AtlasDocs behavior.
+> Read [../../frontend.md](../../frontend.md) instead.
+> Superseded by docs/frontend.md.
+
 # AtlasDocs Frontend Architecture
 
 ## Overview
