@@ -6,7 +6,7 @@ import secrets
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -46,7 +46,15 @@ def get_ui_service(
 
 
 def _validate_csrf(session_csrf: str, csrf_token: str) -> bool:
-    return bool(session_csrf) and secrets.compare_digest(session_csrf, csrf_token)
+    if not session_csrf or csrf_token is None:
+        return False
+    try:
+        return secrets.compare_digest(
+            session_csrf.encode("utf-8"),
+            csrf_token.encode("utf-8"),
+        )
+    except (TypeError, AttributeError):
+        return False
 
 
 def _error_message(exc: Exception) -> str:
@@ -67,24 +75,17 @@ def _redirect_notice(paperless_document_id: int, page: int, notice: str) -> Redi
 
 def _concepts_map(service: DocumentService) -> dict[str, list[dict[str, str]]]:
     mapping: dict[str, list[dict[str, str]]] = {}
-    for rel_type in service.list_relationship_types():
-        if rel_type.target_ontology and rel_type.target_ontology not in mapping:
-            try:
-                mapping[rel_type.target_ontology] = [
-                    {"code": item.code, "name": item.name}
-                    for item in service.list_concepts(rel_type.target_ontology)
-                ]
-            except NotFoundError:
-                mapping[rel_type.target_ontology] = []
-    all_concepts: list[dict[str, str]] = []
-    for ontology_code in ("country", "document-type"):
+    for ontology_code in service.list_ontology_codes():
         try:
-            all_concepts.extend(
+            mapping[ontology_code] = [
                 {"code": item.code, "name": item.name}
                 for item in service.list_concepts(ontology_code)
-            )
+            ]
         except NotFoundError:
-            pass
+            mapping[ontology_code] = []
+    all_concepts: list[dict[str, str]] = []
+    for concepts in mapping.values():
+        all_concepts.extend(concepts)
     mapping["*"] = all_concepts
     return mapping
 
@@ -168,7 +169,7 @@ def workbench(
     request: Request,
     page: int = 1,
     service: DocumentService = Depends(get_ui_service),
-) -> HTMLResponse:
+) -> Response:
     ui_session = get_request_session(request)
     if ui_session is None or not ui_session.authenticated:
         return RedirectResponse(url="/ui/connect", status_code=HTTP_303_SEE_OTHER)
@@ -207,7 +208,7 @@ def document_detail(
     paperless_document_id: int,
     page: int = 1,
     service: DocumentService = Depends(get_ui_service),
-) -> HTMLResponse:
+) -> Response:
     ui_session = get_request_session(request)
     if ui_session is None or not ui_session.authenticated:
         return RedirectResponse(url="/ui/connect", status_code=HTTP_303_SEE_OTHER)

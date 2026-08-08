@@ -20,6 +20,15 @@ def test_production_requires_non_default_session_secret() -> None:
         )
 
 
+def test_production_rejects_blank_session_secret() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            atlasdocs_env="production",
+            session_secret="   ",
+            session_secure=True,
+        )
+
+
 def test_production_requires_secure_cookies() -> None:
     with pytest.raises(ValidationError):
         Settings(
@@ -45,3 +54,17 @@ def test_development_allows_insecure_http_cookies() -> None:
         session_secure=False,
     )
     assert settings.cookie_secure is False
+
+
+def test_session_store_evicts_when_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    from atlasdocs.ui.sessions import InMemorySessionStore
+
+    monkeypatch.setenv("SESSION_MAX_AGE_SECONDS", "3600")
+    get_settings.cache_clear()
+    store = InMemorySessionStore(max_sessions=2)
+    first = store.create()
+    second = store.create()
+    third = store.create()
+    assert store.get(first.id) is None
+    assert store.get(second.id) is not None
+    assert store.get(third.id) is not None

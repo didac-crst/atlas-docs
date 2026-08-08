@@ -1,5 +1,8 @@
 name: CI
 
+# HTTPS smoke tests against live Paperless/Satlas stay manual and out of CI.
+# This workflow verifies code and packaging only (no Postgres/Paperless/secrets).
+
 on:
   pull_request:
   push:

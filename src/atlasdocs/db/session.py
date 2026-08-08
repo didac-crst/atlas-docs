@@ -18,7 +18,8 @@ def get_engine(url: str | URL | None = None) -> Engine:
     global _engine, _SessionLocal
     database_url = _as_url(url) if url is not None else get_settings().sqlalchemy_url()
 
-    if _engine is not None and url is not None and str(_engine.url) != str(database_url):
+    # Compare URL objects directly: str(URL) masks passwords and can miss changes.
+    if _engine is not None and url is not None and _engine.url != database_url:
         _engine.dispose()
         _engine = None
         _SessionLocal = None

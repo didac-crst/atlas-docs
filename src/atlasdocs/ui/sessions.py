@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import Request, Response
 
-from atlasdocs.config import get_settings
+from atlasdocs.config import MAX_UI_SESSIONS, get_settings
 
 COOKIE_NAME = "atlasdocs_sid"
 
@@ -31,15 +31,27 @@ class UiSession:
 
 
 class InMemorySessionStore:
-    """Process-local session store with explicit expiry and logout invalidation."""
+    """Process-local session store with explicit expiry, cap, and logout invalidation."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_sessions: int = MAX_UI_SESSIONS) -> None:
         self._lock = threading.Lock()
         self._sessions: dict[str, UiSession] = {}
+        self._max_sessions = max_sessions
 
     def clear(self) -> None:
         with self._lock:
             self._sessions.clear()
+
+    def _purge_expired_locked(self) -> None:
+        now = _utcnow()
+        expired = [sid for sid, session in self._sessions.items() if session.expires_at <= now]
+        for sid in expired:
+            self._sessions.pop(sid, None)
+
+    def _enforce_cap_locked(self) -> None:
+        while len(self._sessions) >= self._max_sessions:
+            oldest = min(self._sessions.values(), key=lambda item: item.expires_at)
+            self._sessions.pop(oldest.id, None)
 
     def create(self, *, paperless_authorization: str | None = None) -> UiSession:
         settings = get_settings()
@@ -50,6 +62,8 @@ class InMemorySessionStore:
             expires_at=_utcnow() + timedelta(seconds=settings.session_max_age_seconds),
         )
         with self._lock:
+            self._purge_expired_locked()
+            self._enforce_cap_locked()
             self._sessions[session.id] = session
         return session
 
@@ -57,6 +71,7 @@ class InMemorySessionStore:
         if not session_id:
             return None
         with self._lock:
+            self._purge_expired_locked()
             session = self._sessions.get(session_id)
             if session is None:
                 return None
@@ -67,6 +82,7 @@ class InMemorySessionStore:
 
     def save(self, session: UiSession) -> None:
         with self._lock:
+            self._purge_expired_locked()
             self._sessions[session.id] = session
 
     def delete(self, session_id: str | None) -> None:
@@ -79,6 +95,10 @@ class InMemorySessionStore:
         session.csrf_token = secrets.token_urlsafe(32)
         self.save(session)
         return session
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._sessions)
 
 
 session_store = InMemorySessionStore()

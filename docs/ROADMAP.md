@@ -1,5 +1,9 @@
 # AtlasDocs v0.1 Roadmap — Vertical Slice
 
+> Historical planning note for the v0.1 API slice. The classification workbench
+> delivered in v0.2 lives in `src/atlasdocs/ui/` and is described in
+> `docs/v0.2-ui-design-proposal.md`.
+
 ## Goal
 
 Prove that AtlasDocs can sit next to Paperless-ngx and add one typed relationship cleanly.

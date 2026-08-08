@@ -33,6 +33,7 @@ class UnclassifiedPageResponse(BaseModel):
     paperless_count: int
     has_next: bool
     has_previous: bool
+    next_page: int | None = None
 
 
 class RelationshipTypeResponse(BaseModel):

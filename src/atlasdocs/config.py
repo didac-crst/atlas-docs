@@ -6,9 +6,11 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
-# Unclassified inbox: one Paperless page, then a single AtlasDocs filter query.
+# Unclassified inbox: bounded Paperless pages, then one AtlasDocs filter per page.
 UNCLASSIFIED_PAGE_SIZE = 25
+UNCLASSIFIED_MAX_UPSTREAM_PAGES = 5
 DEFAULT_SESSION_SECRET = "dev-only-change-me"
+MAX_UI_SESSIONS = 1000
 
 
 class Settings(BaseSettings):
@@ -33,6 +35,7 @@ class Settings(BaseSettings):
     session_max_age_seconds: int = 60 * 60 * 8
     session_cookie_name: str = "atlasdocs_sid"
     unclassified_page_size: int = UNCLASSIFIED_PAGE_SIZE
+    unclassified_max_upstream_pages: int = UNCLASSIFIED_MAX_UPSTREAM_PAGES
 
     @field_validator("atlasdocs_env")
     @classmethod
@@ -42,12 +45,18 @@ class Settings(BaseSettings):
             raise ValueError("ATLASDOCS_ENV must be 'development' or 'production'")
         return normalized
 
+    @field_validator("session_secret")
+    @classmethod
+    def _strip_session_secret(cls, value: str) -> str:
+        return value.strip()
+
     @model_validator(mode="after")
     def _validate_production_session(self) -> Settings:
         if self.atlasdocs_env == "production":
-            if self.session_secret == DEFAULT_SESSION_SECRET:
+            if not self.session_secret or self.session_secret == DEFAULT_SESSION_SECRET:
                 raise ValueError(
-                    "SESSION_SECRET must be set to a non-default value when ATLASDOCS_ENV=production"
+                    "SESSION_SECRET must be a non-empty, non-default value when "
+                    "ATLASDOCS_ENV=production"
                 )
             if not self.session_secure:
                 raise ValueError(

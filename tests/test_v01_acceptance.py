@@ -320,9 +320,38 @@ def test_unclassified_list_paginated_without_n_plus_one(
     assert 184 in ids
     assert 185 in ids
     assert 186 not in ids
-    # One list call, no per-document Paperless fetches for filtering.
-    assert any("/api/documents" in call and "page_size=25" in call for call in paperless_transport.calls)
+    list_calls = [
+        call
+        for call in paperless_transport.calls
+        if call.startswith("GET /api/documents") and "page_size=25" in call
+    ]
+    assert len(list_calls) == 1
     assert paperless_transport.document_calls == []
+
+
+def test_unclassified_fills_across_paperless_pages(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    # Make page-size-1 scans: first Paperless page is classified, second is not.
+    paperless_transport.documents = {
+        184: {"id": 184, "title": "Classified"},
+        185: {"id": 185, "title": "Needs work"},
+    }
+    assert (
+        client.post(
+            "/documents/184/relationships",
+            headers=AUTH,
+            json={"relationship": "source-country", "target": "germany"},
+        ).status_code
+        == 201
+    )
+    paperless_transport.calls.clear()
+    response = client.get("/documents?unclassified=true&page=1&page_size=1", headers=AUTH)
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["paperless_document_id"] for item in body["items"]] == [185]
+    list_calls = [call for call in paperless_transport.calls if call.startswith("GET /api/documents")]
+    assert len(list_calls) >= 2
 
 
 def test_unclassified_empty_page(client: TestClient, paperless_transport: FakePaperlessTransport) -> None:
@@ -354,13 +383,46 @@ def test_delete_relationship(client: TestClient) -> None:
 
 
 def test_relationship_types_and_concepts(client: TestClient) -> None:
-    types = client.get("/relationship-types")
+    assert client.get("/relationship-types").status_code == 401
+    types = client.get("/relationship-types", headers=AUTH)
     assert types.status_code == 200
     codes = {item["code"] for item in types.json()}
     assert codes == {"source-country", "document-type", "concerns"}
-    concepts = client.get("/ontologies/country/concepts")
+    concepts = client.get("/ontologies/country/concepts", headers=AUTH)
     assert concepts.status_code == 200
     assert {item["name"] for item in concepts.json()} == {"France", "Germany", "Spain"}
+
+
+def test_create_relationship_accepts_concept_code(client: TestClient) -> None:
+    created = client.post(
+        "/documents/184/relationships",
+        headers=AUTH,
+        json={"relationship": "source-country", "target": "germany"},
+    )
+    assert created.status_code == 201
+    assert created.json()["relationships"][0]["target"] == "Germany"
+
+
+def test_get_document_with_multiple_relationships(client: TestClient) -> None:
+    assert (
+        client.post(
+            "/documents/184/relationships",
+            headers=AUTH,
+            json={"relationship": "source-country", "target": "germany"},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/documents/184/relationships",
+            headers=AUTH,
+            json={"relationship": "document-type", "target": "payslip"},
+        ).status_code
+        == 201
+    )
+    fetched = client.get("/documents/184", headers=AUTH)
+    assert fetched.status_code == 200
+    assert len(fetched.json()["relationships"]) == 2
 
 
 def test_ui_requires_session_and_hides_token(client: TestClient) -> None:

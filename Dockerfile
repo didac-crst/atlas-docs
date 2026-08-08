@@ -16,4 +16,4 @@ RUN pip install --no-cache-dir .
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "alembic upgrade head && atlasdocs-seed && uvicorn atlasdocs.main:app --host 0.0.0.0 --port 8080"]
+CMD ["sh", "-c", "alembic upgrade head && atlasdocs-seed && exec uvicorn atlasdocs.main:app --host 0.0.0.0 --port 8080"]

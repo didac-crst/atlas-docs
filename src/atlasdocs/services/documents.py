@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from atlasdocs.config import UNCLASSIFIED_PAGE_SIZE, get_settings
+from atlasdocs.config import UNCLASSIFIED_MAX_UPSTREAM_PAGES, UNCLASSIFIED_PAGE_SIZE, get_settings
 from atlasdocs.db.models import (
     Concept,
     DocumentReference,
@@ -88,6 +88,7 @@ class UnclassifiedPage:
     paperless_count: int
     has_next: bool
     has_previous: bool
+    next_page: int | None = None
 
 
 @dataclass(frozen=True)
@@ -149,15 +150,25 @@ class DocumentService:
     def _resolve_target_concept(
         self, relationship_type: RelationshipType, target: str
     ) -> Concept:
-        stmt = select(Concept).where(Concept.name == target)
-        if relationship_type.target_ontology_id is not None:
-            stmt = stmt.where(Concept.ontology_id == relationship_type.target_ontology_id)
-        matches = list(self._session.scalars(stmt))
-        if not matches:
-            raise ValidationError(f"Unknown target concept '{target}'")
-        if len(matches) > 1:
+        def _matches(column) -> list[Concept]:
+            stmt = select(Concept).where(column == target)
+            if relationship_type.target_ontology_id is not None:
+                stmt = stmt.where(Concept.ontology_id == relationship_type.target_ontology_id)
+            return list(self._session.scalars(stmt))
+
+        by_code = _matches(Concept.code)
+        if len(by_code) == 1:
+            return by_code[0]
+        if len(by_code) > 1:
             raise ValidationError(f"Ambiguous target concept '{target}'")
-        return matches[0]
+
+        # Accept display names for API compatibility with the v0.1 curl examples.
+        by_name = _matches(Concept.name)
+        if len(by_name) == 1:
+            return by_name[0]
+        if len(by_name) > 1:
+            raise ValidationError(f"Ambiguous target concept '{target}'")
+        raise ValidationError(f"Unknown target concept '{target}'")
 
     def _relationship_views(self, reference: DocumentReference | None) -> list[RelationshipView]:
         if reference is None:
@@ -193,7 +204,7 @@ class DocumentService:
     def get_document(self, paperless_document_id: int, token: str | None = None) -> DocumentSemantics:
         auth = self._require_token(token)
         paperless_doc = self._ensure_paperless_access(paperless_document_id, auth)
-        reference = self._session.scalar(
+        reference = self._session.scalars(
             select(DocumentReference)
             .options(
                 joinedload(DocumentReference.entity).joinedload(Entity.relationships).joinedload(
@@ -204,7 +215,7 @@ class DocumentService:
                 .joinedload(Relationship.target_concept),
             )
             .where(DocumentReference.paperless_document_id == paperless_document_id)
-        )
+        ).unique().one_or_none()
         return DocumentSemantics(
             paperless_document_id=paperless_document_id,
             entity_id=str(reference.entity_id) if reference else "",
@@ -226,9 +237,50 @@ class DocumentService:
         size = page_size or self._settings.unclassified_page_size or UNCLASSIFIED_PAGE_SIZE
         if size < 1 or size > UNCLASSIFIED_PAGE_SIZE:
             raise ValidationError(f"page_size must be between 1 and {UNCLASSIFIED_PAGE_SIZE}")
+        max_upstream = (
+            self._settings.unclassified_max_upstream_pages or UNCLASSIFIED_MAX_UPSTREAM_PAGES
+        )
+
+        items: list[UnclassifiedDocument] = []
+        paperless_count = 0
+        upstream_page = page
+        pages_fetched = 0
+        has_next = False
+        last_page_fetched = page
 
         try:
-            paperless_page = self._paperless.list_documents(auth, page=page, page_size=size)
+            while len(items) < size and pages_fetched < max_upstream:
+                paperless_page = self._paperless.list_documents(
+                    auth, page=upstream_page, page_size=size
+                )
+                pages_fetched += 1
+                last_page_fetched = upstream_page
+                paperless_count = paperless_page.count
+                ids = [doc.id for doc in paperless_page.results]
+                confirmed = self._confirmed_paperless_ids(ids)
+                for doc in paperless_page.results:
+                    if doc.id in confirmed:
+                        continue
+                    items.append(
+                        UnclassifiedDocument(
+                            paperless_document_id=doc.id,
+                            title=doc.title,
+                        )
+                    )
+                    if len(items) >= size:
+                        break
+
+                if len(items) >= size:
+                    # More upstream content may still exist on this or later pages.
+                    has_next = paperless_page.has_next or len(paperless_page.results) == size
+                    break
+
+                if not paperless_page.has_next:
+                    has_next = False
+                    break
+
+                upstream_page += 1
+                has_next = True
         except PaperlessAuthError as exc:
             raise ForbiddenDocumentError(str(exc)) from exc
         except PaperlessNotFoundError as exc:
@@ -238,20 +290,14 @@ class DocumentService:
         except PaperlessError as exc:
             raise UpstreamError(str(exc)) from exc
 
-        ids = [doc.id for doc in paperless_page.results]
-        confirmed = self._confirmed_paperless_ids(ids)
-        items = [
-            UnclassifiedDocument(paperless_document_id=doc.id, title=doc.title)
-            for doc in paperless_page.results
-            if doc.id not in confirmed
-        ]
         return UnclassifiedPage(
-            items=items,
+            items=items[:size],
             page=page,
             page_size=size,
-            paperless_count=paperless_page.count,
-            has_next=paperless_page.has_next,
-            has_previous=paperless_page.has_previous,
+            paperless_count=paperless_count,
+            has_next=has_next,
+            has_previous=page > 1,
+            next_page=(last_page_fetched + 1) if has_next else None,
         )
 
     def add_relationship(
@@ -312,13 +358,13 @@ class DocumentService:
         except ValueError as exc:
             raise ValidationError("Invalid relationship id") from exc
 
-        relationship = self._session.scalar(
+        relationship = self._session.scalars(
             select(Relationship)
             .options(
                 joinedload(Relationship.source_entity).joinedload(Entity.document_reference),
             )
             .where(Relationship.id == rel_uuid)
-        )
+        ).unique().one_or_none()
         if relationship is None or relationship.source_entity.document_reference is None:
             raise NotFoundError("Relationship not found")
 
@@ -330,7 +376,7 @@ class DocumentService:
     def list_relationship_types(self) -> list[RelationshipTypeView]:
         rows = self._session.scalars(
             select(RelationshipType).options(joinedload(RelationshipType.target_ontology))
-        )
+        ).unique()
         views = [
             RelationshipTypeView(
                 code=item.code,
@@ -341,6 +387,11 @@ class DocumentService:
         ]
         views.sort(key=lambda item: item.code)
         return views
+
+    def list_ontology_codes(self) -> list[str]:
+        codes = list(self._session.scalars(select(Ontology.code)))
+        codes.sort()
+        return codes
 
     def list_concepts(self, ontology_code: str) -> list[ConceptView]:
         ontology = self._session.scalar(select(Ontology).where(Ontology.code == ontology_code))

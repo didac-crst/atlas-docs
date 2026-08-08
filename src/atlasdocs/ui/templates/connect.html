@@ -4,8 +4,9 @@
 <section class="connect" aria-labelledby="connect-title">
   <h1 id="connect-title">Connect to Paperless</h1>
   <p class="lede">
-    Enter a Paperless API token for your account. AtlasDocs stores it in an HttpOnly
-    session cookie and forwards it server-side. It is never written into page HTML or JavaScript.
+    Enter a Paperless API token for your account. AtlasDocs stores the token
+    server-side and gives the browser only an opaque HttpOnly session cookie.
+    The token is never written into page HTML, JavaScript, or the cookie value.
   </p>
   {% if error %}<p class="flash error" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="/ui/connect" class="connect-form">

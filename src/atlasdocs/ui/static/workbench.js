@@ -18,7 +18,7 @@
     target.innerHTML = "";
     for (const concept of concepts) {
       const option = document.createElement("option");
-      option.value = concept.name;
+      option.value = concept.code;
       option.textContent = concept.name;
       target.appendChild(option);
     }

@@ -91,3 +91,27 @@ def test_get_engine_uses_split_settings(monkeypatch: pytest.MonkeyPatch) -> None
     assert engine.url.host == "db"
     assert engine.url.database == "atlasdocs"
     assert "DATABASE_URL" not in os.environ
+
+
+def test_get_engine_rebuilds_when_password_changes() -> None:
+    first = URL.create(
+        drivername="postgresql+psycopg",
+        username="atlasdocs",
+        password="one",
+        host="db",
+        port=5432,
+        database="atlasdocs",
+    )
+    second = URL.create(
+        drivername="postgresql+psycopg",
+        username="atlasdocs",
+        password="two",
+        host="db",
+        port=5432,
+        database="atlasdocs",
+    )
+    assert str(first) == str(second)  # password is masked in str()
+    engine_one = get_engine(first)
+    engine_two = get_engine(second)
+    assert engine_one is not engine_two
+    assert engine_two.url.password == "two"

@@ -125,6 +125,7 @@ def list_unclassified_documents(
         paperless_count=result.paperless_count,
         has_next=result.has_next,
         has_previous=result.has_previous,
+        next_page=result.next_page,
     )
 
 
@@ -178,8 +179,10 @@ def delete_relationship(
 
 @router.get("/relationship-types", response_model=list[RelationshipTypeResponse])
 def list_relationship_types(
+    authorization: str = Depends(require_authorization),
     service: DocumentService = Depends(get_document_service),
 ) -> list[RelationshipTypeResponse]:
+    _ = authorization
     return [
         RelationshipTypeResponse(
             code=item.code,
@@ -193,8 +196,10 @@ def list_relationship_types(
 @router.get("/ontologies/{ontology_code}/concepts", response_model=list[ConceptResponse])
 def list_concepts(
     ontology_code: str,
+    authorization: str = Depends(require_authorization),
     service: DocumentService = Depends(get_document_service),
 ) -> list[ConceptResponse]:
+    _ = authorization
     try:
         concepts = service.list_concepts(ontology_code)
     except _DOMAIN_ERRORS as exc:

@@ -27,8 +27,10 @@
       {% if queue.has_previous %}
       <a href="/ui?page={{ queue.page - 1 }}">Previous</a>
       {% endif %}
-      <span>Page {{ queue.page }} · {{ queue.page_size }} per Paperless page</span>
-      {% if queue.has_next %}
+      <span>Page {{ queue.page }} · up to {{ queue.page_size }} items</span>
+      {% if queue.has_next and queue.next_page %}
+      <a href="/ui?page={{ queue.next_page }}">Next</a>
+      {% elif queue.has_next %}
       <a href="/ui?page={{ queue.page + 1 }}">Next</a>
       {% endif %}
     </nav>
@@ -38,8 +40,10 @@
       {% if queue.has_previous %}
       <a href="/ui?page={{ queue.page - 1 }}">Previous</a>
       {% endif %}
-      <span>Page {{ queue.page }} · {{ queue.page_size }} per Paperless page</span>
-      {% if queue.has_next %}
+      <span>Page {{ queue.page }} · up to {{ queue.page_size }} items</span>
+      {% if queue.has_next and queue.next_page %}
+      <a href="/ui?page={{ queue.next_page }}">Next</a>
+      {% elif queue.has_next %}
       <a href="/ui?page={{ queue.page + 1 }}">Next</a>
       {% endif %}
     </nav>
