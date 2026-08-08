@@ -5,6 +5,13 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/didac-crst/atlas-docs/actions/workflows/ci.yml"><img src="https://github.com/didac-crst/atlas-docs/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/didac-crst/atlas-docs/pkgs/container/atlasdocs"><img src="https://img.shields.io/badge/GHCR-atlasdocs-0d6cb6?logo=github" alt="GHCR"></a>
+  <img src="https://img.shields.io/badge/Paperless--ngx-companion-08afc6" alt="Paperless companion">
+  <img src="https://img.shields.io/badge/stack-FastAPI_%7C_React_%7C_Postgres-102644" alt="Stack">
+</p>
+
+<p align="center">
   <strong>Paperless stores the documents. AtlasDocs stores the meaning.</strong>
 </p>
 
@@ -35,11 +42,11 @@ AtlasDocs keeps Paperless as the document system of record and adds a **semantic
 | Files, OCR, search, previews, ACLs, lifecycle | **Paperless** |
 | Entities, concepts, typed relationships, classification | **AtlasDocs** |
 
-- **REST only** — no Paperless DB, no filesystem mounts, no embedded viewer  
-- **AtlasDocs UUIDs** — Paperless ids bind via `ExternalReference(system=paperless)`  
-- **Entity ↔ entity edges** — concepts *and* document↔document links, with origin + status  
-- **Auth follows Paperless** — your token; denial → not found; no semantic leaks  
-- **Reconcile without amnesia** — create missing bindings, report orphans, **never** auto-delete  
+- **REST only** — no Paperless DB, no filesystem mounts, no embedded viewer
+- **AtlasDocs UUIDs** — Paperless ids bind via `ExternalReference(system=paperless)`
+- **Entity ↔ entity edges** — concepts *and* document↔document links, with origin + status
+- **Auth follows Paperless** — your token; denial → not found; no semantic leaks
+- **Reconcile without amnesia** — create missing bindings, report orphans, **never** auto-delete
 - **Workbench, not a second archive** — React UI under `/ui`; tokens stay server-side (HttpOnly + CSRF)
 
 ```mermaid
@@ -98,7 +105,7 @@ cd frontend && npm install && npm test && npm run build && cd ..
 docker compose up --build
 ```
 
-Open **http://localhost:8080/ui**, paste a Paperless token, classify.  
+Open **http://localhost:8080/ui**, paste a Paperless token, classify.
 Token stays on the server; the browser only gets an opaque HttpOnly session.
 
 | Env | Role |
