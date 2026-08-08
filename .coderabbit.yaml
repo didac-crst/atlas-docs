@@ -1,0 +1,12 @@
+# CodeRabbit: reviews are manual only.
+# Trigger on a PR with:
+#   @coderabbitai review        # incremental (new commits)
+#   @coderabbitai full review   # full re-review from scratch
+#
+# Docs: https://docs.coderabbit.ai/configuration/auto-review
+
+language: en-US
+
+reviews:
+  auto_review:
+    enabled: false
