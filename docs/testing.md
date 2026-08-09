@@ -75,12 +75,15 @@ Primary modules:
   filters; relationship target-type constraints
 - `tests/test_v06_phase_d_entity_detail.py` — entity detail, backlinks, authz
 - `tests/test_document_content_bff.py` / `tests/test_bff_security.py` — preview/
-  download authz and token non-leakage
+  download authz, redirect/403/404 handling, PDF sniffing, token non-leakage
 - Frontend Vitest — product identity/slogan, About, footer, Explore cards,
-  Connect, Home, document trash confirmation
+  Connect, Home, document trash confirmation, same-origin preview iframe (no
+  empty `sandbox`)
 - Playwright desktop/mobile — Home | Explore | Classify | Ingest navigation,
   Documents | Knowledge Explore, About/slogan/footer, destructive confirmation
   cancel, no credential leakage
+- Playwright focused — `e2e/embedded-preview.spec.ts` same-origin BFF PDF
+  preview, download intact, logout blocks preview
 
 Full semantic-navigation / graph / Perspectives behavior is **not** asserted as
 implemented; those remain future direction (see

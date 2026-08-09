@@ -73,6 +73,8 @@ class FakePaperlessTransport(httpx.BaseTransport):
         self.success_via_json_result = False
         # Override Content-Type for preview/download responses (415 tests).
         self.preview_content_type: str | None = None
+        # Optional status override for preview/download (redirect / error probes).
+        self.preview_status_code: int | None = None
         self.content_hashes: dict[str, int] = {}  # sha256 hex -> paperless id
         self.deleted_document_ids: list[int] = []
         self.trashed_documents: dict[int, dict] = {}
@@ -361,6 +363,15 @@ class FakePaperlessTransport(httpx.BaseTransport):
                 return httpx.Response(401, json={"detail": "unauthorized"})
             if document_id in self.timeout:
                 raise httpx.TimeoutException("timed out", request=request)
+            if self.preview_status_code is not None:
+                code = self.preview_status_code
+                if code in {301, 302, 303, 307, 308}:
+                    return httpx.Response(
+                        code,
+                        headers={"Location": "https://paperless.test/accounts/login/"},
+                        content=b"",
+                    )
+                return httpx.Response(code, json={"detail": f"status-{code}"})
             if document_id in self.server_error:
                 return httpx.Response(503, json={"detail": "unavailable"})
             if document_id in self.unauthorized:

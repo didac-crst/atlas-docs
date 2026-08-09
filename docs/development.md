@@ -6,7 +6,7 @@ private deployment host, tunnel, or secret store.
 ## Prerequisites
 
 - Python 3.13+
-- Node.js 22+ (frontend and docs checks)
+- Node.js 22+ (frontend and docs checks). The repo pins Node via `.nvmrc`; run `nvm use` when entering the tree.
 - Docker (optional; Compose for PostgreSQL + full stack)
 
 ## Quick start

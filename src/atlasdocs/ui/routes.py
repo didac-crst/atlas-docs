@@ -1177,13 +1177,20 @@ def _stream_paperless_document(
             detail="Preview is only available for PDF and raster images",
         )
 
+    # Same-origin iframe needs an explicit inline PDF/image type — never forward
+    # Paperless/Cloudflare framing headers; AtlasDocs sets its own safe headers.
+    if media in {"application/pdf", "application/x-pdf"}:
+        response_media = "application/pdf"
+    else:
+        response_media = media or "application/octet-stream"
+
     safe_name = _safe_download_filename(filename, f"document-{paperless_document_id}")
     headers = {
         "Cache-Control": "no-store",
         "Content-Disposition": f'{disposition}; filename="{safe_name}"',
         "X-Content-Type-Options": "nosniff",
     }
-    return StreamingResponse(chunks, media_type=content_type or "application/octet-stream", headers=headers)
+    return StreamingResponse(chunks, media_type=response_media, headers=headers)
 
 
 @api_router.get("/documents/{paperless_document_id}/preview")

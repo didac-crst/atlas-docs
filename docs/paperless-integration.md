@@ -155,7 +155,7 @@ Paperless token:
 
 | Route | Behavior |
 | --- | --- |
-| `GET /ui/api/documents/{id}/preview` | Stream PDF/raster image (`Cache-Control: no-store`; SVG rejected). Detail UI embeds this inline; “Open preview in new tab” remains available. |
+| `GET /ui/api/documents/{id}/preview` | Stream PDF/raster image (`Content-Disposition: inline`, `Cache-Control: no-store`; SVG rejected; upstream redirects not followed). Detail UI embeds this same-origin URL in an iframe; “Open preview in new tab” remains available. Never iframes the Paperless UI. |
 | `GET /ui/api/documents/{id}/download` | Stream bytes as attachment |
 
 Both require an authenticated UI session. AtlasDocs checks Paperless access

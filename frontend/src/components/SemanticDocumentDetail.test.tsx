@@ -107,6 +107,8 @@ describe("SemanticDocumentDetail document actions", () => {
     expect(frame).not.toBeNull();
     expect(frame).toHaveAttribute("src", "/ui/api/documents/184/preview");
     expect(frame).toHaveAttribute("title", "Preview of Payslip Germany");
+    expect(frame).not.toHaveAttribute("sandbox");
+    expect(frame?.getAttribute("src")).not.toMatch(/paperless/i);
 
     const openTab = screen.getByRole("link", { name: /Open preview in new tab/i });
     expect(openTab).toHaveAttribute("href", "/ui/api/documents/184/preview");

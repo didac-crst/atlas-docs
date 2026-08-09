@@ -447,11 +447,15 @@ export function SemanticDocumentDetail({
 
       <div className="doc-detail-layout">
         <section className="doc-preview-pane" aria-label="Document preview">
+          {/*
+            Same-origin AtlasDocs BFF URL only — never iframe Paperless UI.
+            Do not set sandbox="" here: an empty sandbox blocks the browser PDF
+            viewer and looks like a blank cross-origin/CSP failure.
+          */}
           <iframe
             className="doc-preview-frame"
             src={previewHref}
             title={`Preview of ${documentDisplayTitle(document)}`}
-            sandbox=""
           />
         </section>
         <section className="doc-context-pane">
