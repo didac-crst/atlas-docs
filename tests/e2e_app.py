@@ -12,6 +12,7 @@ os.environ.setdefault("ATLASDOCS_ENV", "development")
 os.environ.setdefault("SESSION_SECRET", "e2e-session-secret")
 os.environ.setdefault("TOKEN_ENCRYPTION_KEY", "e2e-token-encryption-key")
 os.environ.setdefault("SESSION_SECURE", "false")
+os.environ.setdefault("PAPERLESS_PUBLIC_URL", "http://paperless.example.test")
 
 from atlasdocs.api import create_app  # noqa: E402
 from atlasdocs.config import get_settings  # noqa: E402

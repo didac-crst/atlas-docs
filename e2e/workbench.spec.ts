@@ -74,7 +74,12 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   await expect(preview).toHaveAttribute("href", /\/ui\/api\/documents\/184\/preview$/);
   const download = detail.getByRole("link", { name: /^Download$/i });
   await expect(download).toHaveAttribute("href", /\/ui\/api\/documents\/184\/download$/);
-  await expect(detail.getByRole("link", { name: /Open original in Paperless/i })).toBeVisible();
+  const paperless = detail.getByRole("link", { name: /Open original in Paperless/i });
+  await expect(paperless).toHaveAttribute(
+    "href",
+    "http://paperless.example.test/documents/184/",
+  );
+  await expect(paperless).toHaveAttribute("target", "_blank");
 
   await page.getByRole("link", { name: /Reconcile/i }).first().click();
   await expect(page.getByRole("heading", { name: /reconciliation/i })).toBeVisible();
