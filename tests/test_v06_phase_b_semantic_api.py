@@ -157,7 +157,7 @@ def test_explore_documents_and_people(client: TestClient) -> None:
     docs = client.get("/explore", headers=AUTH, params={"mode": "documents", "page": 1})
     assert docs.status_code == 200
     body = docs.json()
-    assert body["mode"] == "document"
+    assert body["mode"] == "documents"
     assert body["page"] == 1
     assert isinstance(body["items"], list)
     assert body["items"], "expected at least one authorized document"

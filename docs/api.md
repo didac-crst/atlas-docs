@@ -29,22 +29,28 @@ Router: `src/atlasdocs/api/routes.py`.
 | GET | `/documents` | List with `unclassified=true` and/or `classification`, `q`, `sort`, `order`, `page`, `completeness` |
 | POST | `/documents/bulk-relationships` | Bulk assign (per-doc Paperless authz) |
 | GET | `/documents/{paperless_document_id}` | Document facade + relationships |
-| DELETE | `/documents/{paperless_document_id}` | Delete Paperless original + tombstone (`{"confirm": true}`) |
+| DELETE | `/documents/{paperless_document_id}` | Evidence: trash by default (`{"confirm": true}`); permanent purge with `permanent: true` |
+| POST | `/documents/{paperless_document_id}/restore` | Restore Evidence from Paperless trash |
 | POST | `/documents/{paperless_document_id}/replace` | Failure-safe replace upload → durable replace job |
 | POST | `/documents/{paperless_document_id}/relationships` | Add relationship (document facade) |
 | POST | `/ingest` | Multipart upload → durable job (new logical document / new entity) |
 | GET | `/ingest/jobs` | Jobs for the calling token fingerprint |
 | GET | `/ingest/jobs/{job_id}` | Job status |
-| GET | `/explore` | Entity-oriented Explore page (`mode`, filters, sort, pagination) |
-| GET | `/entity-types` | Entity type registry (display metadata) |
+| GET | `/explore` | Entity-oriented Explore (`mode=documents\|knowledge\|people|…`) |
+| GET | `/entity-types` | Entity type registry (incl. `lifecycle_category`) |
 | GET | `/entities/search` | Entity search / autocomplete |
 | GET | `/entities/{entity_id}` | Entity detail + outgoing relationships, backlinks, related documents |
+| POST | `/entities/{entity_id}/rename` | Master Data / Organizational rename |
+| POST | `/entities/{entity_id}/archive` | Archive Master Data / Organizational |
+| POST | `/entities/{entity_id}/restore` | Restore archived entity |
+| POST | `/entities/{entity_id}/merge` | Merge redirect placeholder (`target_entity_id`) |
+| DELETE | `/entities/{entity_id}` | Master Data delete (`confirm`); **409** while relationships exist |
 | GET | `/entities/{entity_id}/relationships` | Outgoing relationships |
 | POST | `/entities/{entity_id}/relationships` | Create edge |
 | DELETE | `/relationships/{relationship_id}` | Delete edge (+ companions) |
 | GET | `/relationship-types` | Relationship type catalog (incl. source/target entity types) |
 | GET | `/ontologies/{ontology_code}/concepts` | Concepts in an ontology |
-| POST | `/reconcile` | Reconciliation (`dry_run`, optional `limit`) |
+| POST | `/reconcile` | Reconciliation (`dry_run`, optional `limit`; includes trash/purged lists) |
 
 ### Creating relationships
 
@@ -74,10 +80,24 @@ curl 'http://localhost:8080/documents?unclassified=true&page=1&page_size=25' \
 
 - `open_url` is set only when `PAPERLESS_PUBLIC_URL` is configured; it never
   embeds credentials or uses `PAPERLESS_BASE_URL`.
-- Document **delete** requires body `{"confirm": true}`. Forbidden Paperless
-  deletes map to **404** (same non-leak rule as other document access).
+- Document responses include `lifecycle_category`, `trashed`, `versions`, and
+  `replacement_history` when applicable.
+- Document **delete** requires body `{"confirm": true}` and moves Evidence to
+  Paperless trash by default. Permanent purge uses
+  `{"confirm": true, "permanent": true}`. Forbidden Paperless deletes map to
+  **404** (same non-leak rule as other document access).
+- **Restore** is `POST /documents/{id}/restore`.
+- BFF downloads accept `original=true` and/or `version={paperless_version_id}`
+  (never an Atlas UUID). Responses use `Cache-Control: no-store` and
+  `X-Content-Type-Options: nosniff`.
 - **Replace** is an async ingestion job (`job_kind=replace`); poll
   `/ingest/jobs/{id}` until `READY`. See [document-lifecycle.md](document-lifecycle.md).
+
+### Reconcile response notes
+
+`POST /reconcile` returns `trashed_in_paperless` and `purged_in_paperless` in
+addition to created / already_present / missing / inaccessible lists. Semantic
+data is never auto-deleted.
 
 ## UI BFF
 

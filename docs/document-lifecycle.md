@@ -42,39 +42,48 @@ Rules:
 
 UI action: **Replace document** on document detail.
 
-## Delete
+## Delete (Evidence trash lifecycle)
 
-Deletion is Paperless-backed and intentional:
+Evidence deletion follows Paperless trash semantics (no independent Atlas trash):
 
 ```text
-AtlasDocs request (confirm + CSRF for UI)
-  -> Paperless authorization
-  -> Paperless DELETE
-  -> AtlasDocs tombstone (entities.deleted_at)
+Move to Trash  -> Paperless DELETE (soft) + Atlas trashed_at
+Restore        -> Paperless trash restore + clear trashed_at
+Delete Permanently -> Paperless trash empty + Atlas tombstone (deleted_at)
 ```
 
 Rules:
 
-- Requires explicit `confirm: true`.
-- A user who cannot delete in Paperless cannot delete through AtlasDocs.
+- Default `DELETE /documents/{id}` with `{"confirm": true}` moves to trash.
+- Permanent purge requires `{"confirm": true, "permanent": true}` (typically after trash).
+- A user who cannot delete in Paperless cannot trash or purge through AtlasDocs.
 - Confirmation copy must not rely on exposing raw Paperless IDs.
-- Atlas does **not** hard-delete the entity UUID (relationships remain for audit; normal queries hide them).
+- Atlas does **not** hard-delete the entity UUID on permanent delete (relationships remain for audit; normal queries hide them).
+- Trashed documents leave Explore / normal lists but remain loadable on detail for restore.
 
-UI action: **Delete document** with confirmation that the original is removed from Paperless and normal AtlasDocs views.
+UI actions: **Move to trash**, **Restore**, **Delete permanently**.
 
 ## Tombstone
 
-Tombstoned entities:
+Tombstoned entities (after permanent delete):
 
 - keep their Atlas UUID and last external reference for audit
 - are hidden from normal list/detail/explore/search/home/preview/download
 - are skipped by reconciliation when classifying missing Paperless refs (intentional delete ≠ orphan)
+
+## Replace cleanup
+
+After a successful replace switch, Atlas moves the previous Paperless id to trash
+and permanently deletes it when the API supports that flow, preserving the Atlas
+UUID and relationships on the surviving entity.
 
 ## Reconcile
 
 Reconciliation still never auto-deletes semantic data.
 
 - Creates missing bindings for live Paperless documents.
+- Tracks documents in Paperless trash (`trashed_in_paperless`) and syncs `trashed_at`.
+- Reports purged/missing refs (`purged_in_paperless` / `missing_in_paperless`) without metadata leakage.
 - Ignores tombstoned entities when reporting `missing_in_paperless`.
 - After replacement, the live external reference is the new Paperless id; the old id is gone from Paperless.
 
@@ -105,6 +114,7 @@ Recalculated on:
 - relationship add / bulk assign
 - relationship removal
 - successful replacement
-- deletion (tombstone path)
+- trash / restore / permanent delete (tombstone path)
+- Master Data archive / restore / rename
 
 See also [v0.6 Explore and Semantic Workbench](v0.6-explore-semantic-workbench.md) and migration `0008_document_lifecycle`.

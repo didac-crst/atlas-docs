@@ -20,15 +20,21 @@ type Props = {
   session: SessionInfo;
 };
 
-const MODES: { value: ExploreMode; label: string }[] = [
-  { value: "all", label: "All" },
+const TOP_MODES: { value: ExploreMode; label: string }[] = [
   { value: "documents", label: "Documents" },
+  { value: "knowledge", label: "Knowledge" },
+];
+
+const KNOWLEDGE_MODES: { value: ExploreMode; label: string }[] = [
+  { value: "knowledge", label: "All knowledge" },
   { value: "people", label: "People" },
   { value: "organizations", label: "Organizations" },
   { value: "countries", label: "Countries" },
   { value: "cases", label: "Cases" },
   { value: "concepts", label: "Concepts" },
 ];
+
+const ALL_MODES = [...TOP_MODES, ...KNOWLEDGE_MODES.slice(1)];
 
 type ExploreFilters = {
   q: string;
@@ -44,7 +50,7 @@ type ExploreFilters = {
 };
 
 function parseMode(value: string | null): ExploreMode {
-  const allowed = MODES.map((item) => item.value);
+  const allowed = ALL_MODES.map((item) => item.value);
   if (value && (allowed as string[]).includes(value)) return value as ExploreMode;
   return "documents";
 }
@@ -141,7 +147,7 @@ export function ExplorePage({ session: _session }: Props) {
       setLoading(true);
       setError(null);
       try {
-        const documentMode = mode === "all" || mode === "documents";
+        const documentMode = mode === "documents";
         const next = await fetchExplore({
           mode,
           page,
@@ -188,7 +194,7 @@ export function ExplorePage({ session: _session }: Props) {
     const nextMode = overrides.mode ?? mode;
     const nextView = overrides.view ?? view;
     const nextPage = overrides.page ?? page;
-    const documentMode = nextMode === "all" || nextMode === "documents";
+    const documentMode = nextMode === "documents";
     const nextFilters: ExploreFilters = {
       q: overrides.q ?? filters.q,
       sort: overrides.sort ?? filters.sort,
@@ -253,7 +259,9 @@ export function ExplorePage({ session: _session }: Props) {
     }
   }
 
-  const showDocumentFilters = mode === "all" || mode === "documents";
+  const showDocumentFilters = mode === "documents";
+  const knowledgeActive = mode !== "documents";
+  const topMode: ExploreMode = knowledgeActive ? "knowledge" : "documents";
   const queryForPage = (targetPage: number) => {
     const params = new URLSearchParams(searchParams);
     if (targetPage <= 1) params.delete("page");
@@ -296,19 +304,41 @@ export function ExplorePage({ session: _session }: Props) {
       ) : null}
 
       <div className="explore-modes" role="tablist" aria-label="Explore modes">
-        {MODES.map((item) => (
+        {TOP_MODES.map((item) => (
           <button
             key={item.value}
             type="button"
             role="tab"
             className="explore-mode"
-            aria-selected={mode === item.value}
-            onClick={() => writeParams({ mode: item.value, page: 1 })}
+            aria-selected={topMode === item.value}
+            onClick={() =>
+              writeParams({
+                mode: item.value,
+                page: 1,
+              })
+            }
           >
             {item.label}
           </button>
         ))}
       </div>
+
+      {knowledgeActive ? (
+        <div className="explore-modes explore-knowledge-modes" role="tablist" aria-label="Knowledge types">
+          {KNOWLEDGE_MODES.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              role="tab"
+              className="explore-mode"
+              aria-selected={mode === item.value}
+              onClick={() => writeParams({ mode: item.value, page: 1 })}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <form className="explore-filters" onSubmit={onApplyFilters}>
         <div className="field">

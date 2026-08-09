@@ -19,6 +19,7 @@ describe("AccountMenu", () => {
     expect(screen.queryByRole("menuitem", { name: /Reconcile/i })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /^ada$/i }));
+    expect(screen.getByRole("menuitem", { name: /^About$/i })).toHaveAttribute("href", "/about");
     expect(screen.getByRole("menuitem", { name: /Reconcile/i })).toHaveAttribute(
       "href",
       "/reconcile",

@@ -32,6 +32,8 @@ describe("EntityDetailPage", () => {
       relationships: [],
       display_type: "person",
       semantic_completeness: "empty",
+      lifecycle_category: "master_data",
+      archived: false,
       backlinks: [
         {
           id: "bl-1",

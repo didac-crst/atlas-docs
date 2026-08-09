@@ -112,8 +112,14 @@ describe("SemanticDocumentDetail document actions", () => {
     expect(openTab).toHaveAttribute("href", "/ui/api/documents/184/preview");
     expect(openTab).toHaveAttribute("target", "_blank");
 
-    const download = screen.getByRole("link", { name: /^Download$/i });
+    const download = screen.getByRole("link", {
+      name: (_content, element) => element?.textContent?.replace(/\s+/g, " ").trim() === "Download",
+    });
     expect(download).toHaveAttribute("href", "/ui/api/documents/184/download");
+    expect(screen.getByRole("link", { name: /Download original/i })).toHaveAttribute(
+      "href",
+      "/ui/api/documents/184/download?original=true",
+    );
 
     const paperless = screen.getByRole("link", { name: /Open original in Paperless/i });
     expect(paperless).toHaveAttribute("href", "https://docs.example.test/documents/184/");
@@ -122,7 +128,7 @@ describe("SemanticDocumentDetail document actions", () => {
     expect(screen.getByText(/Technical details/i)).toBeInTheDocument();
     expect(screen.queryByText(/^Document 184$/)).toBeNull();
     expect(screen.getByRole("button", { name: /^Replace document$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Delete document$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Move to trash$/i })).toBeInTheDocument();
   });
 
   it("disables Paperless action when open_url is missing", () => {
@@ -159,7 +165,7 @@ describe("SemanticDocumentDetail document actions", () => {
     expect(screen.getByText("entity-1")).toBeInTheDocument();
   });
 
-  it("requires confirmation before deleting a document", async () => {
+  it("requires confirmation before moving a document to trash", async () => {
     const user = userEvent.setup();
     const onDocumentDeleted = vi.fn(async () => undefined);
     vi.mocked(deleteDocument).mockResolvedValue(undefined as never);
@@ -167,7 +173,7 @@ describe("SemanticDocumentDetail document actions", () => {
     render(
       <MemoryRouter>
         <SemanticDocumentDetail
-          document={{ ...baseDoc, open_url: null }}
+          document={{ ...baseDoc, open_url: null, lifecycle_category: "evidence" }}
           csrfToken="csrf"
           onRemoved={vi.fn()}
           onDocumentDeleted={onDocumentDeleted}
@@ -176,13 +182,16 @@ describe("SemanticDocumentDetail document actions", () => {
       </MemoryRouter>,
     );
 
-    await user.click(screen.getByRole("button", { name: /^Delete document$/i }));
+    await user.click(screen.getByRole("button", { name: /^Move to trash$/i }));
     expect(deleteDocument).not.toHaveBeenCalled();
     expect(
-      screen.getByText(/original file will be deleted from Paperless/i),
+      screen.getByText(/Move this document to Paperless trash/i),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /^Confirm delete$/i }));
-    expect(deleteDocument).toHaveBeenCalledWith(184, "csrf", { confirm: true });
+    await user.click(screen.getByRole("button", { name: /^Confirm move to trash$/i }));
+    expect(deleteDocument).toHaveBeenCalledWith(184, "csrf", {
+      confirm: true,
+      permanent: false,
+    });
     expect(onDocumentDeleted).toHaveBeenCalled();
   });
 });

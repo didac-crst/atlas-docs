@@ -211,7 +211,7 @@ def test_sqlite_upgrade_preserves_entities_and_references_184_197(
 
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert version == "0009_backfill_semantic_completeness"
+        assert version == "0010_lifecycle_categories"
         cols = {col["name"] for col in sa_inspect(engine).get_columns("entities")}
         assert "deleted_at" in cols
         assert "deleted_by_label" in cols
@@ -353,7 +353,7 @@ def test_postgres_upgrade_preserves_entities_and_references_184_197(
 
         with engine.connect() as conn:
             version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert version == "0009_backfill_semantic_completeness"
+            assert version == "0010_lifecycle_categories"
             length = conn.execute(
                 text(
                     """

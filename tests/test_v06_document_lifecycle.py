@@ -72,7 +72,7 @@ def test_delete_authorization_denied(
         "DELETE",
         "/documents/184",
         headers=AUTH,
-        json={"confirm": True},
+        json={"confirm": True, "permanent": True},
     )
     # Forbidden is mapped to 404 so existence is not leaked.
     assert response.status_code == 404
@@ -102,7 +102,7 @@ def test_delete_tombstones_and_hides_from_queries(
         "DELETE",
         "/ui/api/documents/184",
         headers={"X-CSRF-Token": csrf},
-        json={"confirm": True},
+        json={"confirm": True, "permanent": True},
     )
     assert deleted.status_code == 204
     assert 184 in paperless_transport.deleted_document_ids
@@ -294,7 +294,7 @@ def test_completeness_recalculated_on_relationship_remove_and_delete(
         "DELETE",
         "/ui/api/documents/184",
         headers={"X-CSRF-Token": csrf},
-        json={"confirm": True},
+        json={"confirm": True, "permanent": True},
     )
     db = get_session_factory()()
     try:
@@ -315,7 +315,7 @@ def test_reconcile_skips_tombstoned_missing_refs(
         "DELETE",
         "/ui/api/documents/184",
         headers={"X-CSRF-Token": csrf},
-        json={"confirm": True},
+        json={"confirm": True, "permanent": True},
     )
     csrf = client.get("/ui/api/session").json()["csrf_token"]
     result = client.post(

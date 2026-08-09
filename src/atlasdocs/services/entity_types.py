@@ -9,6 +9,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+LIFECYCLE_EVIDENCE = "evidence"
+LIFECYCLE_MASTER_DATA = "master_data"
+LIFECYCLE_ORGANIZATIONAL = "organizational"
+LIFECYCLE_CATEGORIES = frozenset(
+    {LIFECYCLE_EVIDENCE, LIFECYCLE_MASTER_DATA, LIFECYCLE_ORGANIZATIONAL}
+)
+
+
 @dataclass(frozen=True)
 class EntityTypeInfo:
     code: str
@@ -17,6 +25,7 @@ class EntityTypeInfo:
     searchable: bool
     valid_relationship_target: bool
     has_dedicated_page: bool
+    lifecycle_category: str
     """Ontology code when this display type is backed by concepts; None for documents."""
     ontology_code: str | None = None
 
@@ -29,6 +38,7 @@ ENTITY_TYPE_REGISTRY: tuple[EntityTypeInfo, ...] = (
         searchable=True,
         valid_relationship_target=True,
         has_dedicated_page=True,
+        lifecycle_category=LIFECYCLE_EVIDENCE,
         ontology_code=None,
     ),
     EntityTypeInfo(
@@ -38,6 +48,7 @@ ENTITY_TYPE_REGISTRY: tuple[EntityTypeInfo, ...] = (
         searchable=True,
         valid_relationship_target=True,
         has_dedicated_page=True,
+        lifecycle_category=LIFECYCLE_MASTER_DATA,
         ontology_code="person",
     ),
     EntityTypeInfo(
@@ -47,6 +58,7 @@ ENTITY_TYPE_REGISTRY: tuple[EntityTypeInfo, ...] = (
         searchable=True,
         valid_relationship_target=True,
         has_dedicated_page=True,
+        lifecycle_category=LIFECYCLE_MASTER_DATA,
         ontology_code="organization",
     ),
     EntityTypeInfo(
@@ -56,6 +68,7 @@ ENTITY_TYPE_REGISTRY: tuple[EntityTypeInfo, ...] = (
         searchable=True,
         valid_relationship_target=True,
         has_dedicated_page=True,
+        lifecycle_category=LIFECYCLE_MASTER_DATA,
         ontology_code="country",
     ),
     EntityTypeInfo(
@@ -65,6 +78,7 @@ ENTITY_TYPE_REGISTRY: tuple[EntityTypeInfo, ...] = (
         searchable=True,
         valid_relationship_target=True,
         has_dedicated_page=True,
+        lifecycle_category=LIFECYCLE_ORGANIZATIONAL,
         ontology_code="case",
     ),
     EntityTypeInfo(
@@ -74,6 +88,7 @@ ENTITY_TYPE_REGISTRY: tuple[EntityTypeInfo, ...] = (
         searchable=True,
         valid_relationship_target=True,
         has_dedicated_page=True,
+        lifecycle_category=LIFECYCLE_MASTER_DATA,
         ontology_code=None,
     ),
 )
@@ -88,7 +103,12 @@ _ONTOLOGY_TO_REGISTRY: dict[str, str] = {
 }
 
 REGISTRY_TYPE_CODES: frozenset[str] = frozenset(_BY_CODE)
-EXPLORE_MODE_CODES: frozenset[str] = frozenset({"all", *REGISTRY_TYPE_CODES})
+EXPLORE_MODE_CODES: frozenset[str] = frozenset(
+    {"documents", "knowledge", "all", *REGISTRY_TYPE_CODES}
+)
+KNOWLEDGE_MODE_CODES: frozenset[str] = frozenset(
+    {"person", "organization", "country", "case", "concept"}
+)
 
 
 def get_entity_type(code: str) -> EntityTypeInfo | None:
@@ -110,3 +130,10 @@ def ontology_for_registry_code(code: str) -> str | None:
     if info is None:
         return None
     return info.ontology_code
+
+
+def lifecycle_category_for_registry_code(code: str) -> str:
+    info = get_entity_type(code)
+    if info is None:
+        return LIFECYCLE_MASTER_DATA
+    return info.lifecycle_category

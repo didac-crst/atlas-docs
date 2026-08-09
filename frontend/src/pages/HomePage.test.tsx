@@ -1,5 +1,4 @@
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { HomePage } from "./HomePage";
@@ -26,8 +25,6 @@ function LocationProbe() {
 
 describe("HomePage", () => {
   it("sends global search to Explore with q", async () => {
-    const user = userEvent.setup();
-
     render(
       <MemoryRouter initialEntries={["/"]}>
         <Routes>
@@ -40,9 +37,13 @@ describe("HomePage", () => {
       </MemoryRouter>,
     );
 
-    await screen.findByRole("heading", { name: /^Work areas$/i });
-    await user.type(screen.getByLabelText(/Search documents and concepts/i), "Alice");
-    await user.click(screen.getByRole("button", { name: /^Search$/i }));
-    expect(screen.getByTestId("location")).toHaveTextContent("/explore?q=Alice");
+    expect(await screen.findByRole("heading", { name: /^Work areas$/i })).toBeInTheDocument();
+    expect(screen.getByText(/Where evidence becomes knowledge/i)).toBeInTheDocument();
+    const input = screen.getByLabelText(/Search anything/i);
+    fireEvent.change(input, { target: { value: "Alice" } });
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/explore?q=Alice");
+    });
   });
 });

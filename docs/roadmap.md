@@ -33,15 +33,31 @@ full future knowledge graph.
 Contracts:
 
 - [Product experience specification](product-experience-spec.md) (long-term UX /
-  lifecycle model)
+  lifecycle model; future vision marked explicitly)
+- [Product identity](product-identity.md) (AtlasDocs-first branding, slogan, About)
 - [v0.7 Product Experience and Entity Lifecycle](v0.7-product-experience.md)
-  (sprint scope, order, tests, acceptance)
+  (sprint phases, tests, acceptance)
 
-Focus areas (summary): lifecycle categories (Evidence / Master Data /
-Organizational); Explore Documents | Knowledge with canonical cards; evidence
-trash/restore/purge via Paperless; Master Data archive/merge safeguards;
-collection-level reconciliation; version-aware Paperless downloads through the
-BFF (`original` / `version` — Paperless version ids, not Atlas UUIDs).
+Phases (summary):
+
+| Phase | Focus | Status |
+| --- | --- | --- |
+| A | Lifecycle category foundation | Done |
+| B | Canonical cards and Explore Documents \| Knowledge | Done |
+| C | Version-aware downloads and progressive disclosure | Done |
+| D | Evidence trash / restore / permanent delete | Done |
+| E | Master Data rename / archive / merge contract | Done |
+| F | Collection reconcile, hardening, docs | Done |
+
+Shipped focus: lifecycle categories (Evidence / Master Data / Organizational);
+Explore Documents | Knowledge with canonical cards; evidence trash via Paperless;
+Master Data archive/merge safeguards; collection-level reconciliation;
+version-aware Paperless downloads through the BFF (`original` / `version` —
+Paperless version ids, not Atlas UUIDs); AtlasDocs product identity (slogan,
+login/home/footer/About).
+
+Do **not** treat the full product-experience vision (graph viewer, Perspectives,
+timelines, full merge UI) as shipped — see Explicitly deferred.
 
 ## Explicitly deferred
 

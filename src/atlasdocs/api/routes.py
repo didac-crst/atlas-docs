@@ -10,7 +10,10 @@ from atlasdocs.api.schemas import (
     CreateDocumentRelationshipRequest,
     CreateRelationshipRequest,
     DeleteDocumentRequest,
+    DeleteEntityRequest,
+    DocumentReplacementHistoryResponse,
     DocumentResponse,
+    DocumentVersionResponse,
     EntityResponse,
     EntitySearchHitResponse,
     EntityTypeRegistryResponse,
@@ -18,11 +21,13 @@ from atlasdocs.api.schemas import (
     ExploreResultItemResponse,
     IngestionJobResponse,
     IngestionJobsResponse,
+    MergeEntityRequest,
     ReconcileRequest,
     ReconcileResponse,
     RelatedDocumentResponse,
     RelationshipResponse,
     RelationshipTypeResponse,
+    RenameEntityRequest,
     UnclassifiedDocumentResponse,
     UnclassifiedPageResponse,
 )
@@ -137,6 +142,22 @@ def _serialize_document(document) -> DocumentResponse:
         open_url=document.open_url,
         relationships=[_serialize_relationship(item) for item in document.relationships],
         semantic_completeness=getattr(document, "semantic_completeness", "empty") or "empty",
+        lifecycle_category=getattr(document, "lifecycle_category", "evidence") or "evidence",
+        trashed=bool(getattr(document, "trashed", False)),
+        versions=[
+            DocumentVersionResponse(id=item.id, created=item.created)
+            for item in (getattr(document, "versions", None) or [])
+        ],
+        replacement_history=[
+            DocumentReplacementHistoryResponse(
+                previous_external_id=item.previous_external_id,
+                new_external_id=item.new_external_id,
+                actor_label=item.actor_label,
+                reason=item.reason,
+                created_at=item.created_at,
+            )
+            for item in (getattr(document, "replacement_history", None) or [])
+        ],
     )
 
 
@@ -154,6 +175,10 @@ def _serialize_entity(entity) -> EntityResponse:
         relationships=[_serialize_relationship(item) for item in (entity.relationships or [])],
         display_type=getattr(entity, "display_type", None),
         semantic_completeness=getattr(entity, "semantic_completeness", "empty") or "empty",
+        lifecycle_category=getattr(entity, "lifecycle_category", "master_data") or "master_data",
+        archived=bool(getattr(entity, "archived", False)),
+        trashed=bool(getattr(entity, "trashed", False)),
+        merged_into_entity_id=getattr(entity, "merged_into_entity_id", None),
         backlinks=[
             BacklinkResponse(
                 id=item.id,
@@ -197,6 +222,9 @@ def _serialize_explore_page(page) -> ExplorePageResponse:
                 created_date=item.created_date,
                 correspondent=item.correspondent,
                 document_type=item.document_type,
+                lifecycle_category=getattr(item, "lifecycle_category", None),
+                thumbnail_available=bool(getattr(item, "thumbnail_available", False)),
+                relationship_count=int(getattr(item, "relationship_count", 0) or 0),
             )
             for item in page.items
         ],
@@ -432,7 +460,23 @@ def delete_document(
             paperless_document_id,
             token=authorization,
             confirm=payload.confirm,
+            permanent=payload.permanent,
         )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+
+
+@router.post(
+    "/documents/{paperless_document_id}/restore",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def restore_document(
+    paperless_document_id: int,
+    authorization: str = Depends(require_authorization),
+    service: DocumentService = Depends(get_document_service),
+) -> None:
+    try:
+        service.restore_document(paperless_document_id, token=authorization)
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
 
@@ -504,6 +548,79 @@ def get_entity(
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
     return _serialize_entity(entity)
+
+
+@router.post("/entities/{entity_id}/rename", response_model=EntityResponse)
+def rename_entity(
+    entity_id: str,
+    payload: RenameEntityRequest,
+    authorization: str = Depends(require_authorization),
+    service: DocumentService = Depends(get_document_service),
+) -> EntityResponse:
+    try:
+        entity = service.rename_entity(
+            entity_id, payload.display_name, token=authorization
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _serialize_entity(entity)
+
+
+@router.post("/entities/{entity_id}/archive", response_model=EntityResponse)
+def archive_entity(
+    entity_id: str,
+    authorization: str = Depends(require_authorization),
+    service: DocumentService = Depends(get_document_service),
+) -> EntityResponse:
+    try:
+        entity = service.archive_entity(entity_id, token=authorization)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _serialize_entity(entity)
+
+
+@router.post("/entities/{entity_id}/restore", response_model=EntityResponse)
+def restore_entity(
+    entity_id: str,
+    authorization: str = Depends(require_authorization),
+    service: DocumentService = Depends(get_document_service),
+) -> EntityResponse:
+    try:
+        entity = service.restore_entity(entity_id, token=authorization)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _serialize_entity(entity)
+
+
+@router.post("/entities/{entity_id}/merge", response_model=EntityResponse)
+def merge_entity(
+    entity_id: str,
+    payload: MergeEntityRequest,
+    authorization: str = Depends(require_authorization),
+    service: DocumentService = Depends(get_document_service),
+) -> EntityResponse:
+    try:
+        entity = service.merge_entity_placeholder(
+            entity_id, payload.target_entity_id, token=authorization
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _serialize_entity(entity)
+
+
+@router.delete("/entities/{entity_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_entity(
+    entity_id: str,
+    payload: DeleteEntityRequest,
+    authorization: str = Depends(require_authorization),
+    service: DocumentService = Depends(get_document_service),
+) -> None:
+    try:
+        service.delete_master_data_entity(
+            entity_id, token=authorization, confirm=payload.confirm
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
 
 
 @router.get("/entities/{entity_id}/relationships", response_model=list[RelationshipResponse])
@@ -599,6 +716,7 @@ def list_entity_types(
             searchable=item.searchable,
             valid_relationship_target=item.valid_relationship_target,
             has_dedicated_page=item.has_dedicated_page,
+            lifecycle_category=item.lifecycle_category,
         )
         for item in items
     ]
@@ -689,6 +807,8 @@ def reconcile_paperless(
         already_present=summary.already_present,
         missing_in_paperless=summary.missing_in_paperless,
         inaccessible_in_paperless=summary.inaccessible_in_paperless,
+        trashed_in_paperless=summary.trashed_in_paperless,
+        purged_in_paperless=summary.purged_in_paperless,
         errors=summary.errors,
         human_summary=summary.human_summary(),
     )

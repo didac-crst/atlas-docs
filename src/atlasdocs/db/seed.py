@@ -70,6 +70,9 @@ def apply_seed(session: Session, data: dict) -> None:
                     id=uuid.uuid4(),
                     entity_type=EntityType.concept,
                     semantic_completeness="empty",
+                    lifecycle_category=(
+                        "organizational" if ontology.code == "case" else "master_data"
+                    ),
                 )
                 session.add(entity)
                 session.flush()

@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
+  archiveEntity,
   fetchEntity,
+  mergeEntityPlaceholder,
+  renameEntity,
+  restoreEntity,
   type EntityDetail,
   type SessionInfo,
 } from "../api/client";
@@ -28,12 +32,27 @@ function completenessLabel(value: string): string {
   }
 }
 
-export function EntityDetailPage({ session: _session }: Props) {
+function categoryLabel(value: string | undefined): string {
+  switch (value) {
+    case "evidence":
+      return "Evidence";
+    case "organizational":
+      return "Organizational";
+    default:
+      return "Master Data";
+  }
+}
+
+export function EntityDetailPage({ session }: Props) {
   const { entityId } = useParams();
   const navigate = useNavigate();
   const [entity, setEntity] = useState<EntityDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [mergeTarget, setMergeTarget] = useState("");
 
   useEffect(() => {
     if (!entityId) return;
@@ -43,7 +62,10 @@ export function EntityDetailPage({ session: _session }: Props) {
       setError(null);
       try {
         const next = await fetchEntity(entityId);
-        if (!cancelled) setEntity(next);
+        if (!cancelled) {
+          setEntity(next);
+          setRenameValue(next.label);
+        }
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
@@ -65,15 +87,42 @@ export function EntityDetailPage({ session: _session }: Props) {
     return <Navigate to={`/documents/${entity.paperless_document_id}`} replace />;
   }
 
+  const canMutate =
+    entity != null &&
+    (entity.lifecycle_category === "master_data" ||
+      entity.lifecycle_category === "organizational" ||
+      entity.lifecycle_category == null);
+
+  async function runMutation(action: () => Promise<EntityDetail>, message: string) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const next = await action();
+      setEntity(next);
+      setRenameValue(next.label);
+      setNotice(message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="entity-detail-page" aria-labelledby="entity-title">
       <p className="entity-detail-back">
-        <Link to="/explore">← Back to Explore</Link>
+        <Link to="/explore?mode=knowledge">← Back to Explore</Link>
       </p>
 
       {error ? (
         <div className="banner banner-error" role="alert">
           {error}
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="banner" role="status">
+          {notice}
         </div>
       ) : null}
 
@@ -89,10 +138,118 @@ export function EntityDetailPage({ session: _session }: Props) {
             <span className="entity-chip" data-kind={entity.display_type || entity.entity_type}>
               {entity.display_type || entity.entity_type}
             </span>
+            <span className="entity-chip" data-kind="concept">
+              {categoryLabel(entity.lifecycle_category)}
+            </span>
+            {entity.archived ? <span className="muted">Archived</span> : null}
             <h1 id="entity-title">{entity.label}</h1>
             <p className="muted">
               Semantic completeness: {completenessLabel(entity.semantic_completeness)}
             </p>
+            {entity.merged_into_entity_id ? (
+              <p className="muted">
+                Merge redirect recorded toward{" "}
+                <Link to={`/entities/${entity.merged_into_entity_id}`}>
+                  {entity.merged_into_entity_id}
+                </Link>
+                . Full merge UI is not available in v0.7.
+              </p>
+            ) : null}
+
+            {canMutate ? (
+              <div className="doc-actions" role="group" aria-label="Master Data actions">
+                <label className="field">
+                  <span>Display name</span>
+                  <input
+                    type="text"
+                    value={renameValue}
+                    disabled={busy || Boolean(entity.archived)}
+                    onChange={(event) => setRenameValue(event.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={busy || Boolean(entity.archived) || !renameValue.trim()}
+                  onClick={() =>
+                    void runMutation(
+                      () => renameEntity(entity.id, renameValue.trim(), session.csrf_token),
+                      "Entity renamed",
+                    )
+                  }
+                >
+                  Rename
+                </button>
+                {entity.archived ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={busy}
+                    onClick={() =>
+                      void runMutation(
+                        () => restoreEntity(entity.id, session.csrf_token),
+                        "Entity restored",
+                      )
+                    }
+                  >
+                    Restore
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={busy}
+                    onClick={() =>
+                      void runMutation(
+                        () => archiveEntity(entity.id, session.csrf_token),
+                        "Entity archived",
+                      )
+                    }
+                  >
+                    Archive
+                  </button>
+                )}
+              </div>
+            ) : null}
+
+            {canMutate ? (
+              <details className="tech-details">
+                <summary>Merge (placeholder)</summary>
+                <p className="muted">
+                  Records a redirect target only. Relationship rewiring is not implemented yet.
+                  Casual delete is blocked while relationships exist — use archive or this
+                  placeholder instead of a destructive delete control.
+                </p>
+                <label className="field">
+                  <span>Target entity UUID</span>
+                  <input
+                    type="text"
+                    value={mergeTarget}
+                    disabled={busy}
+                    onChange={(event) => setMergeTarget(event.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={busy || !mergeTarget.trim()}
+                  onClick={() =>
+                    void runMutation(
+                      () =>
+                        mergeEntityPlaceholder(
+                          entity.id,
+                          mergeTarget.trim(),
+                          session.csrf_token,
+                        ),
+                      "Merge redirect recorded",
+                    )
+                  }
+                >
+                  Record merge redirect
+                </button>
+              </details>
+            ) : null}
+
             <details className="tech-details">
               <summary>Technical details</summary>
               <dl>
@@ -106,6 +263,12 @@ export function EntityDetailPage({ session: _session }: Props) {
                   <dt>Entity type</dt>
                   <dd>
                     <code>{entity.entity_type}</code>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Lifecycle category</dt>
+                  <dd>
+                    <code>{entity.lifecycle_category || "master_data"}</code>
                   </dd>
                 </div>
               </dl>

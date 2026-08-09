@@ -39,6 +39,12 @@ class EntityType(str, enum.Enum):
     concept = "concept"
 
 
+class LifecycleCategory(str, enum.Enum):
+    evidence = "evidence"
+    master_data = "master_data"
+    organizational = "organizational"
+
+
 class RelationshipDirectionality(str, enum.Enum):
     directed = "directed"
     symmetric = "symmetric"
@@ -135,6 +141,15 @@ class Entity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     semantic_completeness: Mapped[str] = mapped_column(
         String(32), nullable=False, default="empty", server_default="empty"
+    )
+    lifecycle_category: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="master_data", server_default="master_data"
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    trashed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    merged_into_entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("entities.id", ondelete="SET NULL"), nullable=True
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_by_label: Mapped[str | None] = mapped_column(String(255), nullable=True)

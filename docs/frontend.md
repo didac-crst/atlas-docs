@@ -85,7 +85,13 @@ Disconnect live under the account menu.
 | GET | `/ui/api/documents` | List with `q`, `classification`, `sort`, `order`, `page` |
 | POST | `/ui/api/documents/bulk-relationships` | Bulk assign (per-doc authz) |
 | GET | `/ui/api/documents/{id}` | Document detail + relationships |
-| DELETE | `/ui/api/documents/{id}` | Delete Paperless original + tombstone (`confirm` + CSRF) |
+| DELETE | `/ui/api/documents/{id}` | Evidence trash (`confirm`) or permanent (`confirm` + `permanent`) |
+| POST | `/ui/api/documents/{id}/restore` | Restore Evidence from Paperless trash |
+| POST | `/ui/api/entities/{id}/rename` | Master Data rename |
+| POST | `/ui/api/entities/{id}/archive` | Archive |
+| POST | `/ui/api/entities/{id}/restore` | Restore archived entity |
+| POST | `/ui/api/entities/{id}/merge` | Merge redirect placeholder |
+| DELETE | `/ui/api/entities/{id}` | Master Data delete (`confirm`; blocked while linked) |
 | POST | `/ui/api/documents/{id}/replace` | Failure-safe replace upload (async job) |
 | POST | `/ui/api/documents/{id}/relationships` | Add relationship (prefer `target_entity_id`) |
 | DELETE | `/ui/api/relationships/{id}` | Remove relationship |
@@ -100,7 +106,7 @@ Disconnect live under the account menu.
 | GET | `/ui/api/ingest/jobs/{id}` | Job status |
 | POST | `/ui/api/ingest/jobs/{id}/retry` | Retry `RETRYABLE_FAILURE` jobs |
 | GET | `/ui/api/documents/{id}/preview` | Session-auth PDF/image preview stream |
-| GET | `/ui/api/documents/{id}/download` | Session-auth download stream |
+| GET | `/ui/api/documents/{id}/download` | Session-auth download; supports `original=true` and `version={paperless_version_id}` |
 | POST | `/ui/api/reconcile` | Dry-run / apply reconciliation |
 
 SPA shell routes serve `index.html`. `/ui/api/*` is never shadowed by the SPA
@@ -117,6 +123,14 @@ secondary/advanced deep link via `PAPERLESS_PUBLIC_URL` when configured.
 
 AtlasDocs should feel like a semantic engineering tool: calm technical
 workspace, strong hierarchy, restrained surfaces, visible relationships.
+
+Product identity (slogan, login/home/footer/About hierarchy, Paperless as
+secondary infrastructure) is defined in [product-identity.md](product-identity.md).
+Default slogan:
+
+```text
+Where evidence becomes knowledge.
+```
 
 Visual families:
 

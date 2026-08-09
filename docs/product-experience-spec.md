@@ -4,7 +4,16 @@
 
 Product architecture specification for the public AtlasDocs repository.
 
-This document defines the long-term user experience, navigation philosophy, and entity lifecycle model. It is not a deployment specification.
+This document defines the long-term user experience, navigation philosophy, and
+entity lifecycle model. It is **not** a claim that every section is shipped.
+
+- **Implemented now:** see [v0.7 product experience](v0.7-product-experience.md),
+  [document lifecycle](document-lifecycle.md), [product identity](product-identity.md),
+  and [roadmap](roadmap.md).
+- **Future direction:** global graph viewer, Perspectives, timelines, full merge UI,
+  multi-user workspace ACL layers, and any broader “semantic navigation” vision
+  beyond Explore Documents | Knowledge and entity detail. Those remain deferred
+  and must not be described as current product behavior.
 
 ## Core principles
 
@@ -30,6 +39,9 @@ Paperless remains authoritative for OCR, storage, document versions, permissions
 AtlasDocs is authoritative for semantic identity, relationships, ontology, navigation, provenance, and knowledge discovery.
 
 AtlasDocs must not become a second Paperless or bypass Paperless authorization.
+
+Product identity (AtlasDocs-first branding, slogan, login/home/About hierarchy)
+is defined in [product-identity.md](product-identity.md).
 
 ## 2. Entity model and lifecycle categories
 
@@ -198,7 +210,13 @@ Document cards prioritize thumbnail, title, date, type, primary organization, pr
 
 Every important entity should eventually have a dedicated page.
 
-Entity pages may show:
+**v0.7 ships** entity detail with identity, lifecycle category, related documents,
+outgoing relationships, and backlinks (with authz filtering). Master Data /
+Organizational entities support rename, archive, restore, and a merge-redirect
+placeholder.
+
+The richer neighbor groupings, timeline, relationship statistics, and side-panel
+graph chrome below are **future direction**, not current UI:
 
 - identity and type;
 - neighboring entities grouped by type;

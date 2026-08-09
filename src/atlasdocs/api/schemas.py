@@ -43,6 +43,19 @@ class RelatedDocumentResponse(BaseModel):
     relationship_type: str | None = None
 
 
+class DocumentVersionResponse(BaseModel):
+    id: int
+    created: str | None = None
+
+
+class DocumentReplacementHistoryResponse(BaseModel):
+    previous_external_id: str
+    new_external_id: str
+    actor_label: str | None = None
+    reason: str | None = None
+    created_at: str | None = None
+
+
 class DocumentResponse(BaseModel):
     paperless_document_id: int
     entity_id: str | None = None
@@ -53,6 +66,12 @@ class DocumentResponse(BaseModel):
     open_url: str | None = None
     relationships: list[RelationshipResponse]
     semantic_completeness: str = "empty"
+    lifecycle_category: str = "evidence"
+    trashed: bool = False
+    versions: list[DocumentVersionResponse] = Field(default_factory=list)
+    replacement_history: list[DocumentReplacementHistoryResponse] = Field(
+        default_factory=list
+    )
 
 
 class EntityResponse(BaseModel):
@@ -68,6 +87,10 @@ class EntityResponse(BaseModel):
     relationships: list[RelationshipResponse] = Field(default_factory=list)
     display_type: str | None = None
     semantic_completeness: str = "empty"
+    lifecycle_category: str = "master_data"
+    archived: bool = False
+    trashed: bool = False
+    merged_into_entity_id: str | None = None
     backlinks: list[BacklinkResponse] = Field(default_factory=list)
     related_documents: list[RelatedDocumentResponse] = Field(default_factory=list)
     backlinks_truncated: bool = False
@@ -186,6 +209,7 @@ class EntityTypeRegistryResponse(BaseModel):
     searchable: bool
     valid_relationship_target: bool
     has_dedicated_page: bool
+    lifecycle_category: str = "master_data"
 
 
 class ExploreResultItemResponse(BaseModel):
@@ -202,6 +226,9 @@ class ExploreResultItemResponse(BaseModel):
     created_date: str | None = None
     correspondent: str | None = None
     document_type: str | None = None
+    lifecycle_category: str | None = None
+    thumbnail_available: bool = False
+    relationship_count: int = 0
 
 
 class ExplorePageResponse(BaseModel):
@@ -233,9 +260,24 @@ class ReconcileResponse(BaseModel):
     already_present: list[int]
     missing_in_paperless: list[int]
     inaccessible_in_paperless: list[int]
+    trashed_in_paperless: list[int] = Field(default_factory=list)
+    purged_in_paperless: list[int] = Field(default_factory=list)
     errors: list[str]
     human_summary: str
 
 
 class DeleteDocumentRequest(BaseModel):
     confirm: bool = False
+    permanent: bool = False
+
+
+class DeleteEntityRequest(BaseModel):
+    confirm: bool = False
+
+
+class RenameEntityRequest(BaseModel):
+    display_name: str = Field(..., min_length=1)
+
+
+class MergeEntityRequest(BaseModel):
+    target_entity_id: str = Field(..., min_length=1)

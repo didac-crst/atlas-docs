@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { ApiError, disconnect, getSession, type SessionInfo } from "./api/client";
 import { AccountMenu } from "./components/AccountMenu";
+import { AppFooter } from "./components/AppFooter";
+import { ProductIdentity } from "./components/ProductIdentity";
+import { AboutPage } from "./pages/AboutPage";
 import { ConnectPage } from "./pages/ConnectPage";
 import { EntityDetailPage } from "./pages/EntityDetailPage";
 import { ExplorePage } from "./pages/ExplorePage";
@@ -56,8 +59,8 @@ export function App() {
 
   if (busy) {
     return (
-      <div className="main" role="status" aria-live="polite">
-        Loading AtlasDocs…
+      <div className="main boot-screen" role="status" aria-live="polite">
+        <ProductIdentity size="lg" status="Connecting…" />
       </div>
     );
   }
@@ -119,8 +122,8 @@ export function App() {
               />
             </>
           ) : (
-            <Link to="/connect" aria-current="page">
-              Connect
+            <Link to="/connect" aria-current={path.startsWith("/connect") ? "page" : undefined}>
+              Sign in
             </Link>
           )}
         </nav>
@@ -144,6 +147,7 @@ export function App() {
               />
             }
           />
+          <Route path="/about" element={<AboutPage />} />
           <Route
             path="/reconcile"
             element={
@@ -217,6 +221,7 @@ export function App() {
           <Route path="*" element={<Navigate to={authenticated ? "/" : "/connect"} replace />} />
         </Routes>
       </main>
+      <AppFooter />
     </div>
   );
 }

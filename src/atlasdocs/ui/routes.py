@@ -29,7 +29,10 @@ from atlasdocs.api.schemas import (
     ConceptResponse,
     CreateRelationshipRequest,
     DeleteDocumentRequest,
+    DeleteEntityRequest,
+    DocumentReplacementHistoryResponse,
     DocumentResponse,
+    DocumentVersionResponse,
     EntityResponse,
     EntitySearchHitResponse,
     EntityTypeRegistryResponse,
@@ -41,10 +44,12 @@ from atlasdocs.api.schemas import (
     RecentKnowledgeResponse,
     IngestionJobResponse,
     IngestionJobsResponse,
+    MergeEntityRequest,
     ReconcileRequest,
     ReconcileResponse,
     RelationshipResponse,
     RelationshipTypeResponse,
+    RenameEntityRequest,
     UnclassifiedDocumentResponse,
     UnclassifiedPageResponse,
 )
@@ -211,6 +216,22 @@ def _serialize_document(document) -> DocumentResponse:
         open_url=document.open_url,
         relationships=[_serialize_relationship(item) for item in document.relationships],
         semantic_completeness=getattr(document, "semantic_completeness", "empty") or "empty",
+        lifecycle_category=getattr(document, "lifecycle_category", "evidence") or "evidence",
+        trashed=bool(getattr(document, "trashed", False)),
+        versions=[
+            DocumentVersionResponse(id=item.id, created=item.created)
+            for item in (getattr(document, "versions", None) or [])
+        ],
+        replacement_history=[
+            DocumentReplacementHistoryResponse(
+                previous_external_id=item.previous_external_id,
+                new_external_id=item.new_external_id,
+                actor_label=item.actor_label,
+                reason=item.reason,
+                created_at=item.created_at,
+            )
+            for item in (getattr(document, "replacement_history", None) or [])
+        ],
     )
 
 
@@ -231,6 +252,9 @@ def _serialize_explore_page(page) -> ExplorePageResponse:
                 created_date=item.created_date,
                 correspondent=item.correspondent,
                 document_type=item.document_type,
+                lifecycle_category=getattr(item, "lifecycle_category", None),
+                thumbnail_available=bool(getattr(item, "thumbnail_available", False)),
+                relationship_count=int(getattr(item, "relationship_count", 0) or 0),
             )
             for item in page.items
         ],
@@ -486,6 +510,120 @@ def get_entity_detail(
     return _json_with_session(_serialize_entity(entity), ui_session)
 
 
+@api_router.post("/entities/{entity_id}/rename", response_model=EntityResponse)
+def rename_ui_entity(
+    request: Request,
+    entity_id: str,
+    payload: RenameEntityRequest,
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        entity = service.rename_entity(entity_id, payload.display_name, token=auth)
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_entity(entity), ui_session)
+
+
+@api_router.post("/entities/{entity_id}/archive", response_model=EntityResponse)
+def archive_ui_entity(
+    request: Request,
+    entity_id: str,
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        entity = service.archive_entity(entity_id, token=auth)
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_entity(entity), ui_session)
+
+
+@api_router.post("/entities/{entity_id}/restore", response_model=EntityResponse)
+def restore_ui_entity(
+    request: Request,
+    entity_id: str,
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        entity = service.restore_entity(entity_id, token=auth)
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_entity(entity), ui_session)
+
+
+@api_router.post("/entities/{entity_id}/merge", response_model=EntityResponse)
+def merge_ui_entity(
+    request: Request,
+    entity_id: str,
+    payload: MergeEntityRequest,
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        entity = service.merge_entity_placeholder(
+            entity_id, payload.target_entity_id, token=auth
+        )
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_entity(entity), ui_session)
+
+
+@api_router.delete("/entities/{entity_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_ui_entity(
+    request: Request,
+    entity_id: str,
+    payload: DeleteEntityRequest,
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> Response:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        service.delete_master_data_entity(
+            entity_id, token=auth, confirm=payload.confirm
+        )
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    set_session_cookie(response, ui_session)
+    return response
+
+
 @api_router.get("/explore", response_model=ExplorePageResponse)
 def explore(
     request: Request,
@@ -555,6 +693,7 @@ def list_entity_types(
             searchable=item.searchable,
             valid_relationship_target=item.valid_relationship_target,
             has_dedicated_page=item.has_dedicated_page,
+            lifecycle_category=item.lifecycle_category,
         )
         for item in rows
     ]
@@ -897,8 +1036,35 @@ def delete_ui_document(
             paperless_document_id,
             token=auth,
             confirm=payload.confirm,
+            permanent=payload.permanent,
             actor_label=ui_session.username_label,
         )
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    set_session_cookie(response, ui_session)
+    return response
+
+
+@api_router.post(
+    "/documents/{paperless_document_id}/restore",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def restore_ui_document(
+    request: Request,
+    paperless_document_id: int,
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> Response:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        service.restore_document(paperless_document_id, token=auth)
         store = DbSessionStore(db)
         if not store.rotate_csrf(ui_session):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -970,6 +1136,8 @@ def _stream_paperless_document(
     kind: str,
     disposition: str,
     documents: DocumentService | None = None,
+    original: bool = False,
+    version: int | None = None,
 ) -> StreamingResponse:
     if documents is not None:
         reference = documents.get_external_reference(paperless_document_id)
@@ -979,7 +1147,11 @@ def _stream_paperless_document(
         # Authz probe first so we never leak existence via stream errors.
         paperless.assert_accessible(paperless_document_id, auth)
         chunks, content_type, filename = paperless.stream_document_file(
-            auth, paperless_document_id, kind=kind  # type: ignore[arg-type]
+            auth,
+            paperless_document_id,
+            kind=kind,  # type: ignore[arg-type]
+            original=original,
+            version=version,
         )
     except (PaperlessAuthError, PaperlessNotFoundError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found") from None
@@ -1040,6 +1212,8 @@ def download_document(
     db: Session = Depends(get_db),
     paperless: PaperlessClient = Depends(get_paperless_client),
     service: DocumentService = Depends(get_ui_service),
+    original: bool = Query(default=False),
+    version: int | None = Query(default=None),
 ) -> StreamingResponse:
     _ui_session, auth = _require_ui_auth(request, db)
     return _stream_paperless_document(
@@ -1049,6 +1223,8 @@ def download_document(
         kind="download",
         disposition="attachment",
         documents=service,
+        original=original,
+        version=version,
     )
 
 
@@ -1081,6 +1257,8 @@ def reconcile(
         already_present=summary.already_present,
         missing_in_paperless=summary.missing_in_paperless,
         inaccessible_in_paperless=summary.inaccessible_in_paperless,
+        trashed_in_paperless=summary.trashed_in_paperless,
+        purged_in_paperless=summary.purged_in_paperless,
         errors=summary.errors,
         human_summary=summary.human_summary(),
     )
