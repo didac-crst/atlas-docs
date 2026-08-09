@@ -1570,10 +1570,17 @@ a.explore-card-title:hover {
 }
 
 @media (max-width: 699px) {
+  /* Edge-to-edge: padded root + height:100% pushes chrome outside the viewport. */
+  .dialog-root:has(.dialog-panel-mobile-full) {
+    padding: 0;
+    place-items: stretch;
+  }
+
   .dialog-panel-mobile-full {
     width: 100%;
-    max-height: 100%;
+    max-height: none;
     height: 100%;
+    max-width: none;
     border-radius: 0;
   }
 
@@ -1620,11 +1627,13 @@ a.explore-card-title:hover {
   display: grid;
   gap: var(--space-4);
   grid-template-columns: minmax(0, 1.4fr) minmax(18rem, 0.9fr);
+  grid-template-areas: "preview side";
   min-height: min(70vh, 40rem);
   flex: 1;
 }
 
 .document-viewer-preview {
+  grid-area: preview;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1632,6 +1641,7 @@ a.explore-card-title:hover {
 }
 
 .document-viewer-side {
+  grid-area: side;
   min-width: 0;
   max-height: min(70vh, 40rem);
   overflow: auto;
@@ -1650,20 +1660,6 @@ a.explore-card-title:hover {
   font-size: 1.15rem;
 }
 
-@media (max-width: 899px) {
-  .document-viewer-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .document-viewer-side {
-    padding-left: 0;
-    border-left: 0;
-    border-top: 1px solid var(--border);
-    padding-top: var(--space-3);
-    max-height: none;
-  }
-}
-
 .document-viewer-frame {
   display: block;
   width: 100%;
@@ -1672,6 +1668,29 @@ a.explore-card-title:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-elevated, #fff);
+}
+
+@media (max-width: 899px) {
+  .document-viewer-layout {
+    grid-template-columns: 1fr;
+    /* Details/actions first so primary controls stay in the mobile viewport. */
+    grid-template-areas: "side" "preview";
+    min-height: 0;
+  }
+
+  .document-viewer-side {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 0;
+    border-bottom: 1px solid var(--border);
+    padding-top: 0;
+    padding-bottom: var(--space-3);
+    max-height: none;
+  }
+
+  .document-viewer-frame {
+    min-height: min(45vh, 22rem);
+  }
 }
 
 .classify-batch-bar {
