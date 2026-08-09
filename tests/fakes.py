@@ -63,6 +63,16 @@ class FakePaperlessTransport(httpx.BaseTransport):
         self.uploaded_files: list[dict] = []
         self.tasks: dict[str, dict] = {}
         self.task_auto_succeed = True
+        # When True, SUCCESS tasks omit related_document/result (resolution path).
+        self.omit_related_document_on_success = False
+        # When True, SUCCESS tasks expose document_id only via result_data.
+        self.success_document_id_in_result_data = False
+        # When True, SUCCESS tasks use related_document_ids only.
+        self.success_via_related_document_ids = False
+        # When True, SUCCESS tasks use a JSON string in result.
+        self.success_via_json_result = False
+        # Override Content-Type for preview/download responses (415 tests).
+        self.preview_content_type: str | None = None
         self.content_hashes: dict[str, int] = {}  # sha256 hex -> paperless id
 
     def _authorized(self, request: httpx.Request) -> bool:
@@ -110,24 +120,30 @@ class FakePaperlessTransport(httpx.BaseTransport):
                 return httpx.Response(503, json={"detail": "unavailable"})
             if self.post_document_status is not None:
                 return httpx.Response(self.post_document_status, json={"detail": "error"})
-            # Multipart bodies may be streamed; force a read for the fake.
             body = request.read()
             filename = "upload.bin"
+            title: str | None = None
             content_type = request.headers.get("content-type", "")
-            if b"filename=" in body[:4000]:
-                text_head = body[:8000].decode("latin-1", errors="ignore")
-                marker = 'filename="'
-                if marker in text_head:
-                    start = text_head.index(marker) + len(marker)
-                    end = text_head.find('"', start)
-                    if end > start:
-                        filename = text_head[start:end]
+            text_head = body[:8000].decode("latin-1", errors="ignore")
+            marker = 'filename="'
+            if marker in text_head:
+                start = text_head.index(marker) + len(marker)
+                end = text_head.find('"', start)
+                if end > start:
+                    filename = text_head[start:end]
+            title_marker = 'name="title"\r\n\r\n'
+            if title_marker in text_head:
+                start = text_head.index(title_marker) + len(title_marker)
+                end = text_head.find("\r\n", start)
+                if end > start:
+                    title = text_head[start:end]
             task_id = str(uuid.uuid4())
             doc_id = self.next_document_id
             self.next_document_id += 1
             self.uploaded_files.append(
                 {
                     "filename": filename,
+                    "title": title,
                     "size": len(body),
                     "content_type": content_type,
                     "task_id": task_id,
@@ -135,19 +151,25 @@ class FakePaperlessTransport(httpx.BaseTransport):
                 }
             )
             status = "SUCCESS" if self.task_auto_succeed else "PENDING"
-            self.tasks[task_id] = {
-                "task_id": task_id,
-                "status": status,
-                "related_document": doc_id if self.task_auto_succeed else None,
-                "result": str(doc_id) if self.task_auto_succeed else None,
-            }
+            task_row: dict = {"task_id": task_id, "status": status}
             if self.task_auto_succeed:
+                if self.success_document_id_in_result_data:
+                    task_row["result_data"] = {"document_id": doc_id}
+                elif self.success_via_related_document_ids:
+                    task_row["related_document_ids"] = [doc_id]
+                elif self.success_via_json_result:
+                    task_row["result"] = json.dumps({"document_id": doc_id})
+                elif not self.omit_related_document_on_success:
+                    task_row["related_document"] = doc_id
+                    task_row["result"] = str(doc_id)
+            self.tasks[task_id] = task_row
+            if self.task_auto_succeed:
+                indexed_title = filename if self.omit_related_document_on_success else (title or filename)
                 self.documents[doc_id] = {
                     "id": doc_id,
-                    "title": filename,
+                    "title": indexed_title,
                     "created_date": "2024-06-01",
                 }
-            # Paperless often returns a bare UUID string.
             return httpx.Response(200, content=f'"{task_id}"', headers={"content-type": "application/json"})
 
         if path.endswith("/api/tasks") and request.method == "GET":
@@ -184,13 +206,31 @@ class FakePaperlessTransport(httpx.BaseTransport):
             page = int(query.get("page", ["1"])[0])
             page_size = int(query.get("page_size", [str(UNCLASSIFIED_PAGE_SIZE)])[0])
             q = (query.get("query") or [""])[0].strip().lower()
+            title_search = (query.get("title_search") or [""])[0]
+            title_iexact = (query.get("title__iexact") or [""])[0]
             ordering = (query.get("ordering") or [""])[0]
             created_gte = (query.get("created__date__gte") or [""])[0]
             created_lte = (query.get("created__date__lte") or [""])[0]
             correspondent_q = (query.get("correspondent__name__icontains") or [""])[0].lower()
             doc_type_q = (query.get("document_type__name__icontains") or [""])[0].lower()
             ordered = list(self.documents.values())
+            search_mode = False
+            if title_search:
+                search_mode = True
+                needle = title_search.lower()
+                ordered = [
+                    item
+                    for item in ordered
+                    if needle in str(item.get("title") or "").lower()
+                ]
+            if title_iexact:
+                ordered = [
+                    item
+                    for item in ordered
+                    if str(item.get("title") or "").lower() == title_iexact.lower()
+                ]
             if q:
+                search_mode = True
                 ordered = [
                     item
                     for item in ordered
@@ -246,6 +286,11 @@ class FakePaperlessTransport(httpx.BaseTransport):
                 ordered.sort(key=lambda item: item["id"], reverse=reverse)
             start = (page - 1) * page_size
             chunk = ordered[start : start + page_size]
+            if search_mode:
+                chunk = [
+                    {**item, "__search_hit__": {"score": 1.0, "rank": idx}}
+                    for idx, item in enumerate(chunk)
+                ]
             return httpx.Response(
                 200,
                 json={
@@ -258,6 +303,32 @@ class FakePaperlessTransport(httpx.BaseTransport):
 
         if "/api/documents/" not in path:
             return httpx.Response(404, json={"detail": "not found"})
+
+        parts = path.split("/")
+        if len(parts) >= 2 and parts[-1] in {"preview", "download"}:
+            kind = parts[-1]
+            document_id = int(parts[-2])
+            if not self._authorized(request):
+                return httpx.Response(401, json={"detail": "unauthorized"})
+            if document_id in self.timeout:
+                raise httpx.TimeoutException("timed out", request=request)
+            if document_id in self.server_error:
+                return httpx.Response(503, json={"detail": "unavailable"})
+            if document_id in self.unauthorized:
+                return httpx.Response(401, json={"detail": "unauthorized"})
+            if document_id in self.denied:
+                return httpx.Response(403, json={"detail": "forbidden"})
+            if document_id not in self.documents:
+                return httpx.Response(404, json={"detail": "not found"})
+            doc = self.documents[document_id]
+            filename = str(doc.get("title") or f"document-{document_id}.pdf")
+            content = b"%PDF-fake-" + kind.encode("ascii") + b"-" + str(document_id).encode("ascii")
+            content_type = self.preview_content_type or "application/pdf"
+            headers = {
+                "content-type": content_type,
+                "content-disposition": f'attachment; filename="{filename}"',
+            }
+            return httpx.Response(200, content=content, headers=headers)
 
         document_id = int(path.split("/")[-1])
         self.document_calls.append(document_id)

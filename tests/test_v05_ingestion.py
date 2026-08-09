@@ -287,6 +287,7 @@ def test_logout_keeps_inflight_job_token_until_terminal(
         assert job is not None
         assert job.state == IngestionJobState.processing
         assert job.token_ciphertext
+        assert spool_path_for(job_id).exists()
         cipher = job.token_ciphertext
     finally:
         db.close()

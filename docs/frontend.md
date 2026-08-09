@@ -88,6 +88,9 @@ header. The SPA does not send the Paperless token to those paths.
 | POST | `/ui/api/ingest` | Multipart upload → durable job |
 | GET | `/ui/api/ingest/jobs` | Current identity’s jobs |
 | GET | `/ui/api/ingest/jobs/{id}` | Job status |
+| POST | `/ui/api/ingest/jobs/{id}/retry` | Retry `RETRYABLE_FAILURE` jobs |
+| GET | `/ui/api/documents/{id}/preview` | Session-auth PDF/image preview stream |
+| GET | `/ui/api/documents/{id}/download` | Session-auth download stream |
 | POST | `/ui/api/reconcile` | Dry-run / apply reconciliation |
 
 SPA shell routes serve `index.html`. `/ui/api/*` is never shadowed by the SPA
@@ -96,7 +99,9 @@ fallback.
 The relationship composer resolves **Atlas entity** targets via
 `/ui/api/entities/search` (no raw Paperless ID field in the progressive UI).
 Paperless identifiers stay in technical details; document detail offers
-**Open original** via `PAPERLESS_PUBLIC_URL` when configured.
+**Document actions:** Preview and Download via AtlasDocs BFF (session cookie;
+no Paperless token in the browser). **Open original in Paperless** is a
+secondary/advanced deep link via `PAPERLESS_PUBLIC_URL` when configured.
 
 ## Product character and brand
 

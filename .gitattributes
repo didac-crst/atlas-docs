@@ -1,0 +1,2 @@
+# Binary fixtures must not be text-diffed (PDF xref rows end with spaces by design).
+*.pdf binary

@@ -10,7 +10,11 @@ Historical milestone plans live under [archive/](archive/).
 - Deterministic Paperless reconciliation without auto-delete
 - React workbench with home, classify (search/filter/bulk), ingest, reconcile
 - Password login → server-side token; PostgreSQL sessions; encrypted job tokens
-- Durable async ingestion worker (`atlasdocs worker ingest`)
+- Durable async ingestion worker (`atlasdocs worker ingest`) with document
+  resolution (`RESOLVING_DOCUMENT`), retryable failures, and spool retention
+  until READY
+- Document Preview / Download BFF proxies (session-authenticated; no Paperless
+  token in the browser)
 
 Design contracts:
 [v0.5 ingestion & classification](v0.5-ingestion-classification-spec.md)

@@ -429,6 +429,21 @@ textarea {
   color: var(--text-primary);
 }
 
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--surface-alt);
+}
+
+.doc-action-advanced {
+  font-size: 0.9rem;
+}
+
 .btn-danger {
   background: #fef2f2;
   color: var(--danger);

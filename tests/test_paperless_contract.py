@@ -11,6 +11,7 @@ from atlasdocs.services.paperless import (
     PaperlessClient,
     PaperlessDuplicateError,
     PaperlessUnavailableError,
+    _filename_from_content_disposition,
 )
 from tests.fakes import FakePaperlessTransport
 
@@ -23,6 +24,16 @@ def transport() -> FakePaperlessTransport:
 @pytest.fixture()
 def client(transport: FakePaperlessTransport) -> PaperlessClient:
     return PaperlessClient(base_url="http://paperless.test", transport=transport)
+
+
+def test_filename_from_content_disposition_rfc5987() -> None:
+    assert (
+        _filename_from_content_disposition("attachment; filename*=UTF-8''rapport%20final.pdf")
+        == "rapport final.pdf"
+    )
+    assert (
+        _filename_from_content_disposition('attachment; filename="plain.pdf"') == "plain.pdf"
+    )
 
 
 def test_token_exchange_success_shape(client: PaperlessClient, transport: FakePaperlessTransport) -> None:
@@ -83,3 +94,45 @@ def test_get_task_pending(client: PaperlessClient, transport: FakePaperlessTrans
     status = client.get_task(task_id, "Token test")
     assert status.status == "PENDING"
     assert status.related_document_id is None
+
+
+def test_get_task_result_data_document_id(
+    client: PaperlessClient, transport: FakePaperlessTransport
+) -> None:
+    transport.success_document_id_in_result_data = True
+    task_id = client.post_document("Token test", filename="a.pdf", content=b"abc")
+    status = client.get_task(task_id, "Token test")
+    assert status.status == "SUCCESS"
+    assert status.related_document_id is not None
+    assert status.result_data == {"document_id": status.related_document_id}
+
+
+def test_get_task_related_document_ids(
+    client: PaperlessClient, transport: FakePaperlessTransport
+) -> None:
+    transport.success_via_related_document_ids = True
+    task_id = client.post_document("Token test", filename="a.pdf", content=b"abc")
+    status = client.get_task(task_id, "Token test")
+    assert status.status == "SUCCESS"
+    assert status.related_document_ids
+    assert PaperlessClient.primary_document_id(status) == status.related_document_ids[0]
+
+
+def test_get_task_json_result_document_id(
+    client: PaperlessClient, transport: FakePaperlessTransport
+) -> None:
+    transport.success_via_json_result = True
+    task_id = client.post_document("Token test", filename="a.pdf", content=b"abc")
+    status = client.get_task(task_id, "Token test")
+    assert status.status == "SUCCESS"
+    assert PaperlessClient.primary_document_id(status) is not None
+
+
+def test_get_task_success_without_document_id(
+    client: PaperlessClient, transport: FakePaperlessTransport
+) -> None:
+    transport.omit_related_document_on_success = True
+    task_id = client.post_document("Token test", filename="a.pdf", content=b"abc")
+    status = client.get_task(task_id, "Token test")
+    assert status.status == "SUCCESS"
+    assert PaperlessClient.primary_document_id(status) is None

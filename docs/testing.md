@@ -22,6 +22,20 @@ node scripts/check_mermaid.mjs
 node scripts/check_doc_links.mjs
 ```
 
+### Live Paperless ingestion smoke (manual)
+
+Against a real Paperless-ngx (verified on 3.0.5 / API v10). Credentials only via
+env vars; output is limited to job id, task fingerprint, state, and error code.
+
+```bash
+PAPERLESS_BASE_URL=http://10.10.0.12:3040 \
+PAPERLESS_USERNAME=... PAPERLESS_PASSWORD=... \
+python scripts/live_ingest_smoke.py e2e/fixtures/ingest-smoke.pdf
+```
+
+Optional AtlasDocs UI path: set `ATLASDOCS_BASE_URL` (and the same Paperless
+login env) so the script enqueues through `/ui/api/ingest` and polls the job.
+
 ## CI expectations
 
 Workflow: `.github/workflows/ci.yml`.

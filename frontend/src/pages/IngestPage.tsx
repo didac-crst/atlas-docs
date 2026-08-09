@@ -7,6 +7,7 @@ import {
   getSession,
   ingestDocument,
   jobNeedsPolling,
+  retryIngestJob,
   type IngestJob,
   type SessionInfo,
 } from "../api/client";
@@ -115,6 +116,27 @@ export function IngestPage({ session, onSession }: Props) {
     }
   }
 
+  async function onRetry(jobId: string) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const job = await retryIngestJob(jobId, session.csrf_token);
+      setNotice(`Retry queued · job ${job.id.slice(0, 8)}… (${job.state})`);
+      onSession(await getSession());
+      await refreshJobs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Retry failed");
+      try {
+        onSession(await getSession());
+      } catch {
+        /* ignore */
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="ingest-layout">
       <section className="panel" aria-labelledby="ingest-title">
@@ -176,6 +198,7 @@ export function IngestPage({ session, onSession }: Props) {
                   <th scope="col">Updated</th>
                   <th scope="col">Paperless</th>
                   <th scope="col">Error</th>
+                  <th scope="col">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -195,6 +218,20 @@ export function IngestPage({ session, onSession }: Props) {
                     </td>
                     <td className="muted">
                       {job.error_message || job.error_code || "—"}
+                    </td>
+                    <td>
+                      {job.state === "RETRYABLE_FAILURE" ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled={busy}
+                          onClick={() => void onRetry(job.id)}
+                        >
+                          Retry
+                        </button>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                   </tr>
                 ))}

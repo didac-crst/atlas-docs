@@ -1,5 +1,7 @@
-import { ExternalLink, Link2, Trash2 } from "lucide-react";
+import { Download, ExternalLink, Eye, Link2, Trash2 } from "lucide-react";
 import {
+  documentDownloadUrl,
+  documentPreviewUrl,
   fetchDocument,
   removeRelationship,
   type DocumentDetail,
@@ -66,6 +68,8 @@ export function SemanticDocumentDetail({
   }
 
   const context = documentContextLine(document);
+  const previewHref = documentPreviewUrl(document.paperless_document_id);
+  const downloadHref = documentDownloadUrl(document.paperless_document_id);
 
   return (
     <div>
@@ -75,6 +79,17 @@ export function SemanticDocumentDetail({
         </h1>
         {context ? <p className="doc-context">{context}</p> : null}
         <div className="doc-actions">
+          <a
+            className="btn btn-primary"
+            href={previewHref}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Eye size={16} aria-hidden /> Preview
+          </a>
+          <a className="btn btn-secondary" href={downloadHref} download>
+            <Download size={16} aria-hidden /> Download
+          </a>
           {onAddRelationship ? (
             <button type="button" className="btn btn-secondary" onClick={onAddRelationship}>
               <Link2 size={16} aria-hidden /> Add relationship
@@ -89,14 +104,15 @@ export function SemanticDocumentDetail({
               href={document.open_url}
               target="_blank"
               rel="noreferrer noopener"
-              className="btn btn-primary"
+              className="btn btn-ghost doc-action-advanced"
+              title="Advanced: open the source document in Paperless"
             >
               <ExternalLink size={16} aria-hidden /> Open original in Paperless
             </a>
           ) : (
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-ghost doc-action-advanced"
               disabled
               title="PAPERLESS_PUBLIC_URL is not configured"
             >

@@ -17,6 +17,7 @@ flowchart LR
   AtlasDocs -->|"HTTPS_REST_Token"| Paperless
   Browser[Browser]
   Browser -->|"Open_in_Paperless"| PublicOrigin[PAPERLESS_PUBLIC_URL]
+  Browser -->|"Preview_Download_BFF"| AtlasDocs
   Browser -.->|"never_BASE_URL"| AtlasDocs
 ```
 
@@ -56,17 +57,106 @@ calls so arbitrary strings cannot bypass auth.
 `atlasdocs.services.paperless.PaperlessClient` is a thin HTTP adapter:
 
 - `exchange_password` / `get_document` / `list_documents` / `post_document` /
-  `get_task` / `assert_accessible` / `validate_token`
+  `get_task` / `find_document_id_by_correlation_title` / `stream_document_file` /
+  `assert_accessible` / `validate_token`
 - Resolves correspondent and document-type labels from nested objects or
   integer ids (cached secondary lookups)
 
 ## Ingestion
 
 Uploads are accepted by AtlasDocs, forwarded via `POST /api/documents/post_document/`,
-and tracked until Paperless consume completes. AtlasDocs SHA-256 duplicate
-detection runs at enqueue; Paperless remains the document duplicate authority
-on consume. Temporary upload spools are deleted after forward or terminal
-failure. Job `token_ciphertext` is wiped on READY/FAILED.
+and tracked until Paperless consume completes and AtlasDocs can bind a
+Paperless document id.
+
+Verified against deployed **Paperless-ngx 3.0.5** (API v10): consume task rows
+expose `related_document_ids` and `result_data.document_id` when populate
+succeeds, but those fields are **not always present**. There is no
+`related_document` key on API v10 task objects. AtlasDocs therefore polls the
+task to a terminal status, parses every documented id field, and falls back to
+documented title search when needed.
+
+### Job FSM
+
+| State | Meaning |
+| --- | --- |
+| `UPLOADING` | Spool on disk; forward to Paperless when claimed |
+| `PROCESSING` | `post_document` task id recorded; poll Paperless task status |
+| `RESOLVING_DOCUMENT` | Task succeeded but payload lacked a document id; correlate by title |
+| `RETRYABLE_FAILURE` | Resolution timed out or worker error with spool still present; operator may retry |
+| `READY` | Document id bound; semantic entity created; spool and job token wiped |
+| `FAILED` | Terminal error (duplicate, auth, task failure, missing spool, processing timeout) |
+
+Spool files and encrypted job tokens are retained through `UPLOADING`,
+`PROCESSING`, and `RESOLVING_DOCUMENT`. They are deleted only on `READY` or
+terminal `FAILED`. `RETRYABLE_FAILURE` keeps both so a retry can resume.
+When a Paperless task id already exists, AtlasDocs never re-POSTs the upload.
+
+### Correlation title strategy
+
+Each upload sets a deterministic Paperless document **title** at post time:
+
+```text
+atlasdocs:{job_uuid}
+```
+
+The original filename is preserved as the multipart `document` filename and in
+AtlasDocs job metadata. When a Paperless task returns terminal `SUCCESS`
+without a document id in any of:
+
+- `related_document` (API v9 and earlier)
+- `related_document_ids`
+- `result_data.document_id` / `result_data.duplicate_of`
+- digit / JSON `result`
+
+AtlasDocs enters `RESOLVING_DOCUMENT` and calls the documented title-only
+search:
+
+```text
+GET /api/documents/?title_search=atlasdocs:{job_uuid}
+```
+
+Then it keeps only results whose `title` **exactly equals** the correlation
+value and requires **exactly one** such hit. Zero matches, multiple exact
+matches, or substring-only hits are treated as unresolved (no guessing by
+filename or timing). AtlasDocs does **not** use undocumented filters such as
+`title__iexact`.
+
+**Limitation:** If the task payload never exposes a document id and title
+correlation fails (Paperless ignores the title field, index lag, etc.), the
+job moves to `RETRYABLE_FAILURE` with spool + token retained for retry.
+
+Duplicate detection: AtlasDocs SHA-256 at enqueue; Paperless remains the
+document duplicate authority on consume.
+
+### Retry
+
+`POST /ui/api/ingest/jobs/{id}/retry` (session auth + CSRF) resets a
+`RETRYABLE_FAILURE` job:
+
+- When `paperless_task_id` is set → `RESOLVING_DOCUMENT` (re-run title / task lookup)
+- When no task id but spool exists → `UPLOADING` (re-post)
+
+Terminal `FAILED` jobs cannot be retried.
+
+Tune resolution with `INGEST_RESOLUTION_TIMEOUT_SECONDS`,
+`INGEST_RESOLUTION_MAX_ATTEMPTS`, and `INGEST_RETRYABLE_RETENTION_SECONDS`
+(see `.env.example`). Stale `RETRYABLE_FAILURE` jobs past the retention window
+are reaped to terminal `FAILED` (token and spool wiped).
+
+## Document content proxy
+
+Preview and download are served by the UI BFF so the browser never sees a
+Paperless token:
+
+| Route | Behavior |
+| --- | --- |
+| `GET /ui/api/documents/{id}/preview` | Stream PDF/raster image inline (`Cache-Control: no-store`; SVG rejected) |
+| `GET /ui/api/documents/{id}/download` | Stream bytes as attachment |
+
+Both require an authenticated UI session. AtlasDocs checks Paperless access
+server-side, streams upstream bytes through to the client, and does not write
+document content to AtlasDocs disk. Inaccessible documents return **404** with
+no title or body leak.
 
 ## Reconciliation
 

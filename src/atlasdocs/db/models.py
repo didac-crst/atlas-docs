@@ -59,6 +59,8 @@ class RelationshipStatus(str, enum.Enum):
 class IngestionJobState(str, enum.Enum):
     uploading = "UPLOADING"
     processing = "PROCESSING"
+    resolving_document = "RESOLVING_DOCUMENT"
+    retryable_failure = "RETRYABLE_FAILURE"
     ready = "READY"
     failed = "FAILED"
 
@@ -279,9 +281,14 @@ class IngestionJob(Base):
     content_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     paperless_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     paperless_document_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    correlation_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    resolution_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     processing_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolution_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
