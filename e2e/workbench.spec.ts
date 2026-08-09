@@ -18,6 +18,14 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
     timeout: 15000,
   });
   await expect(page.getByText(/Work areas|Needs classification/i).first()).toBeVisible();
+  const primaryNav = page.getByRole("navigation", { name: /Primary/i });
+  await expect(primaryNav.getByRole("link", { name: /^Home$/i })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: /^Explore$/i })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: /^Classify$/i })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: /^Ingest$/i })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: /Reconcile/i })).toHaveCount(0);
+  await expect(primaryNav.getByRole("button", { name: /Disconnect/i })).toHaveCount(0);
+  await expect(page.getByRole("search")).toBeVisible();
   await expect(page.getByText(password)).toHaveCount(0);
   await expect(page.getByText(/e2e-exchanged-token/i)).toHaveCount(0);
 
@@ -45,6 +53,35 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   });
   await expect(page.getByText(password)).toHaveCount(0);
 
+  await page.getByRole("link", { name: /^Explore$/i }).first().click();
+  await expect(page.getByRole("heading", { name: /^Explore$/i })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /^Documents$/i })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.getByRole("button", { name: /^Grid$/i }).click();
+  await expect(page.getByRole("button", { name: /^Grid$/i })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByRole("tab", { name: /^People$/i }).click();
+  await expect(page.getByRole("tab", { name: /^People$/i })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.getByLabel(/^Search$/i).fill("Ali");
+  await page.getByRole("button", { name: /Apply filters/i }).click();
+  const alice = page.getByRole("link", { name: /^Alice$/i });
+  await expect(alice.or(page.getByText(/No results for this Explore query/i))).toBeVisible({
+    timeout: 15000,
+  });
+  if (await alice.count()) {
+    await alice.first().click();
+    await expect(page.getByRole("heading", { name: /^Alice$/i })).toBeVisible();
+    await expect(page.getByText(/Related documents|Backlinks|Outgoing relationships/i).first()).toBeVisible();
+  }
+  await expect(page.getByText(password)).toHaveCount(0);
+
   await page.getByRole("link", { name: /^Classify$/i }).first().click();
   await expect(page.getByRole("heading", { name: /Needs classification|Classify|Documents/i })).toBeVisible();
 
@@ -70,8 +107,10 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   const detail = page.locator(".detail-panel");
   await expect(detail.getByRole("heading", { name: /Payslip Germany/i })).toBeVisible();
 
-  const preview = detail.getByRole("link", { name: /^Preview$/i });
-  await expect(preview).toHaveAttribute("href", /\/ui\/api\/documents\/184\/preview$/);
+  const previewFrame = detail.locator("iframe.doc-preview-frame");
+  await expect(previewFrame).toHaveAttribute("src", /\/ui\/api\/documents\/184\/preview$/);
+  const openPreview = detail.getByRole("link", { name: /Open preview in new tab/i });
+  await expect(openPreview).toHaveAttribute("href", /\/ui\/api\/documents\/184\/preview$/);
   const download = detail.getByRole("link", { name: /^Download$/i });
   await expect(download).toHaveAttribute("href", /\/ui\/api\/documents\/184\/download$/);
   const paperless = detail.getByRole("link", { name: /Open original in Paperless/i });
@@ -81,7 +120,8 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   );
   await expect(paperless).toHaveAttribute("target", "_blank");
 
-  await page.getByRole("link", { name: /Reconcile/i }).first().click();
+  await page.getByRole("button", { name: /^ada$/i }).click();
+  await page.getByRole("menuitem", { name: /Reconcile/i }).click();
   await expect(page.getByRole("heading", { name: /reconciliation/i })).toBeVisible();
   await page.getByRole("button", { name: /Run reconciliation/i }).click();
   await expect(page.getByText(/Dry-run complete/i)).toBeVisible();

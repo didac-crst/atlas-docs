@@ -30,7 +30,7 @@ function parseClassification(value: string | null): ClassificationFilter {
 }
 
 function parseCompleteness(value: string | null): CompletenessFilter {
-  if (value === "empty" || value === "partial" || value === "complete" || value === "any") {
+  if (value === "empty" || value === "partial" || value === "classified" || value === "needs_review" || value === "complete" || value === "any") {
     return value;
   }
   return "any";
@@ -250,6 +250,20 @@ export function WorkbenchPage({ session, onSession }: Props) {
                 setNotice(message);
                 await refreshCsrf();
                 setQueue(await reloadQueue());
+              }}
+              onReplaced={async (nextDoc, message) => {
+                setDocument(nextDoc);
+                setNotice(message);
+                await refreshCsrf();
+                setQueue(await reloadQueue());
+                navigate(`/documents/${nextDoc.paperless_document_id}${listSearchString()}`);
+              }}
+              onDocumentDeleted={async () => {
+                setNotice("Document deleted");
+                await refreshCsrf();
+                setDocument(null);
+                setQueue(await reloadQueue());
+                navigate(`/classify${listSearchString()}`);
               }}
               onError={setError}
             />

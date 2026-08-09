@@ -21,20 +21,44 @@ Design contracts:
 · [ADR 0002](adr/0002-v05-session-ingest-security.md)
 · [v0.5 product UX refinement](v0.5-product-ux-refinement.md) (home summaries, entity autocomplete, document header).
 
+## Next sprint (v0.6)
+
+**Explore and semantic workbench** — make AtlasDocs the primary exploration and
+classification interface while Paperless remains the document authority.
+
+Contract: [v0.6 Explore and Semantic Workbench](v0.6-explore-semantic-workbench.md).
+
+Phases (summary):
+
+| Phase | Focus | Status |
+| --- | --- | --- |
+| A | Document experience: optional titles (no `atlasdocs:` UUID titles), inline preview | Done |
+| B | Semantic API: entity search, type registry, relationship constraints, completeness | Done |
+| C | Explore UI: nav, search/filters/sort/pagination, list/grid | Done |
+| D | Entity detail foundation and related context | Done |
+| E | Home launcher; move Reconcile/Disconnect out of primary nav; validation | Done |
+| F | Document delete/replace lifecycle (tombstone, failure-safe replace, completeness) | Done |
+
+Contract details: [v0.6 Explore and Semantic Workbench](v0.6-explore-semantic-workbench.md)
+· [document lifecycle](document-lifecycle.md).
+
 ## Explicitly deferred
 
-Not implemented and not implied by current docs:
+Not implemented and not implied by current docs (still deferred after v0.6
+unless a later milestone picks them up):
 
 - LLMs / automatic classification agents
 - MCP servers or tool bridges
 - Embeddings / vector search
-- Graph visualization as the primary UI
+- Graph visualization as the primary UI (or graph editing)
+- Full Perspectives / timeline engines
+- Evidence entities; complex multi-user semantic ACLs
 - Native notes / freeform annotation store
 - Sidecar writers or filesystem sync
-- Evidence / case management product surface
 - Bulk legacy migration tooling beyond Alembic schema history
 - Automatic deletion of semantic data when Paperless removes documents
-- Background workers beyond the single v0.5 ingest worker; webhook ingestion
+  (intentional AtlasDocs delete/replace is separate and specified in v0.6)
+- Background workers beyond the single ingest worker; webhook ingestion
 - Private-deployment-specific scheduling, tunnels, or secret wiring
 
 ## Public product rule

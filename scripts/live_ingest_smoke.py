@@ -70,6 +70,15 @@ def _looks_like_task_id(text: str) -> bool:
     return bool(stripped) and "\n" not in stripped and len(stripped) < 80 and "{" not in stripped
 
 
+def _coerce_document_id(value: Any) -> int | None:
+    if value is None or isinstance(value, (dict, list, bool)):
+        return None
+    text = str(value).strip()
+    if not text.isdigit():
+        return None
+    return int(text)
+
+
 class _DenyRedirects(HTTPRedirectHandler):
     """Refuse redirects so Authorization is never replayed to another origin."""
 
@@ -182,9 +191,9 @@ def _emit(**fields: object) -> None:
 def smoke_paperless(base: str, fixture: Path, timeout: int) -> int:
     http = _HttpClient()
     auth = {"Authorization": _paperless_token(http, base)}
-    correlation = f"atlasdocs:{uuid.uuid4()}"
+    # Omit title so Paperless derives a normal title (matches AtlasDocs Phase A).
     body, content_type = _multipart(
-        {"title": correlation},
+        {},
         {"document": (fixture.name, fixture.read_bytes(), "application/pdf")},
     )
     status, task_body = http.request(
@@ -218,12 +227,15 @@ def smoke_paperless(base: str, fixture: Path, timeout: int) -> int:
             continue
         row = rows[0] if isinstance(rows[0], dict) else {}
         task_status = str(row.get("status") or row.get("state") or "").upper()
-        related = row.get("related_document_ids") if isinstance(row.get("related_document_ids"), list) else []
+        related = row.get("related_document")
+        related_ids = row.get("related_document_ids") if isinstance(row.get("related_document_ids"), list) else []
         result_data = row.get("result_data") if isinstance(row.get("result_data"), dict) else {}
-        if related:
-            doc_id = related[0]
-        elif result_data.get("document_id") is not None:
-            doc_id = result_data.get("document_id")
+        candidates = [related, *related_ids, result_data.get("document_id"), result_data.get("duplicate_of")]
+        for candidate in candidates:
+            coerced = _coerce_document_id(candidate)
+            if coerced is not None:
+                doc_id = coerced
+                break
         if task_status in {"SUCCESS", "FAILURE"}:
             if task_status == "FAILURE":
                 state = "FAILED"
@@ -231,42 +243,14 @@ def smoke_paperless(base: str, fixture: Path, timeout: int) -> int:
             elif doc_id is not None:
                 state = "READY"
             else:
-                state = "RESOLVING_DOCUMENT"
+                # No title-search fallback: task payload must expose the document id.
+                state = "RETRYABLE_FAILURE"
+                error_code = "missing_document"
             break
         time.sleep(1)
     else:
         state = "FAILED"
         error_code = "timeout"
-
-    if state == "RESOLVING_DOCUMENT":
-        exact: list[object] = []
-        page = 1
-        while page <= 50:
-            status, payload = http.request(
-                "GET",
-                f"{base}/api/documents/?{urlencode({'title_search': correlation, 'page_size': 25, 'page': page})}",
-                headers=auth,
-            )
-            if status >= 400:
-                _die("paperless title correlation failed")
-            if not isinstance(payload, dict):
-                _die("paperless title correlation failed")
-            results = payload.get("results") if isinstance(payload.get("results"), list) else []
-            for item in results:
-                if isinstance(item, dict) and str(item.get("title") or "").strip() == correlation:
-                    exact.append(item.get("id"))
-                    if len(exact) > 1:
-                        break
-            if len(exact) > 1 or not payload.get("next"):
-                break
-            page += 1
-        if len(exact) == 1 and exact[0] is not None:
-            doc_id = exact[0]
-            state = "READY"
-            error_code = None
-        else:
-            state = "RETRYABLE_FAILURE"
-            error_code = "missing_document"
 
     _emit(
         mode="paperless",

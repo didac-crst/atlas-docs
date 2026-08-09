@@ -36,6 +36,15 @@ def _directionality(value: str | None) -> RelationshipDirectionality:
     return RelationshipDirectionality(value)
 
 
+def _entity_type_list(value: object) -> list[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError(f"entity type list must be a list, got {type(value).__name__}")
+    codes = [str(item).strip().lower() for item in value if str(item).strip()]
+    return codes or None
+
+
 def apply_seed(session: Session, data: dict) -> None:
     ontology_by_code: dict[str, Ontology] = {}
 
@@ -57,7 +66,11 @@ def apply_seed(session: Session, data: dict) -> None:
                 )
             )
             if concept is None:
-                entity = Entity(id=uuid.uuid4(), entity_type=EntityType.concept)
+                entity = Entity(
+                    id=uuid.uuid4(),
+                    entity_type=EntityType.concept,
+                    semantic_completeness="empty",
+                )
                 session.add(entity)
                 session.flush()
                 session.add(
@@ -89,12 +102,16 @@ def apply_seed(session: Session, data: dict) -> None:
             select(RelationshipType).where(RelationshipType.code == item["code"])
         )
         directionality = _directionality(item.get("directionality"))
+        source_types = _entity_type_list(item.get("source_entity_types"))
+        target_types = _entity_type_list(item.get("target_entity_types"))
         if rel_type is None:
             rel_type = RelationshipType(
                 code=item["code"],
                 name=item["name"],
                 target_ontology_id=target_ontology_id,
                 directionality=directionality,
+                source_entity_types=source_types,
+                target_entity_types=target_types,
             )
             session.add(rel_type)
             session.flush()
@@ -102,6 +119,8 @@ def apply_seed(session: Session, data: dict) -> None:
             rel_type.name = item["name"]
             rel_type.target_ontology_id = target_ontology_id
             rel_type.directionality = directionality
+            rel_type.source_entity_types = source_types
+            rel_type.target_entity_types = target_types
         rel_types[rel_type.code] = rel_type
 
     session.flush()

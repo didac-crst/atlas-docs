@@ -12,6 +12,9 @@ Canonical description of the current semantic layer (post-v0.4).
 AtlasDocs never embeds a document viewer, never touches Paperless databases or
 filesystems, and integrates only through the Paperless **REST API**.
 
+Document create / replace / delete / tombstone behavior:
+[document-lifecycle.md](document-lifecycle.md) (migration `0008_document_lifecycle`).
+
 See [paperless-integration.md](paperless-integration.md) for authorization and
 URL rules.
 
@@ -53,7 +56,19 @@ Every semantic object is an `Entity` with an AtlasDocs UUID.
 | `concept` | A coded concept in an ontology (country, document-type, person, organization, …) |
 
 Person and organization are **concept entities** today, not separate
-`EntityType` values.
+`EntityType` values. The v0.6 **entity type registry** maps them (plus Country,
+Case, Concept) to product-facing browse types for Explore and relationship
+constraints without expanding the database enum.
+
+### Semantic completeness
+
+Document (and other) entities store `semantic_completeness`:
+
+`empty` · `partial` · `classified` · `needs_review`
+
+The value is recalculated when relationships change. Documents become
+`classified` when they have a confirmed `document-type` relationship (v0.6
+minimum rule).
 
 ### External references
 

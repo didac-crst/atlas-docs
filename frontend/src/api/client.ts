@@ -1,6 +1,7 @@
 export type SessionInfo = {
   authenticated: boolean;
   csrf_token: string;
+  username_label?: string | null;
 };
 
 export type Relationship = {
@@ -11,6 +12,42 @@ export type Relationship = {
   origin: string;
   status: string;
   source_entity_id: string | null;
+};
+
+export type Backlink = {
+  id: string;
+  type: string;
+  source: string;
+  source_entity_id: string;
+  origin: string;
+  status: string;
+  source_paperless_document_id: number | null;
+};
+
+export type RelatedDocument = {
+  paperless_document_id: number;
+  entity_id: string;
+  label: string;
+  created_date: string | null;
+  relationship_type: string | null;
+};
+
+export type EntityDetail = {
+  id: string;
+  entity_type: string;
+  label: string;
+  paperless_document_id: number | null;
+  title: string | null;
+  created_date: string | null;
+  correspondent: string | null;
+  document_type: string | null;
+  open_url: string | null;
+  relationships: Relationship[];
+  display_type: string | null;
+  semantic_completeness: string;
+  backlinks: Backlink[];
+  related_documents: RelatedDocument[];
+  backlinks_truncated?: boolean;
 };
 
 export type DocumentDetail = {
@@ -43,7 +80,13 @@ export type QueuePage = {
 };
 
 export type ClassificationFilter = "unclassified" | "classified" | "any";
-export type CompletenessFilter = "empty" | "partial" | "complete" | "any";
+export type CompletenessFilter =
+  | "empty"
+  | "partial"
+  | "classified"
+  | "needs_review"
+  | "complete"
+  | "any";
 export type DocumentSort = "created" | "title" | "correspondent" | "added";
 export type SortOrder = "asc" | "desc";
 
@@ -69,6 +112,8 @@ export type RelationshipType = {
   target_ontology: string | null;
   directionality: string;
   inverse: string | null;
+  source_entity_types?: string[] | null;
+  target_entity_types?: string[] | null;
 };
 
 export type Concept = {
@@ -104,7 +149,81 @@ export type HomeSummary = {
   recent_knowledge: RecentKnowledge[];
 };
 
-export type EntitySearchType = "document" | "concept" | "any";
+export type EntitySearchType =
+  | "document"
+  | "concept"
+  | "any"
+  | "person"
+  | "organization"
+  | "country"
+  | "case";
+
+export type ExploreMode =
+  | "all"
+  | "documents"
+  | "people"
+  | "organizations"
+  | "countries"
+  | "cases"
+  | "concepts";
+
+export type ExploreView = "list" | "grid";
+
+export type ExploreResultItem = {
+  id: string | null;
+  label: string;
+  entity_type: string;
+  semantic_completeness: string;
+  subtitle: string | null;
+  paperless_document_id: number | null;
+  open_url: string | null;
+  preview_available: boolean;
+  download_available: boolean;
+  relationship_summary: string[];
+  created_date: string | null;
+  correspondent: string | null;
+  document_type: string | null;
+};
+
+export type ExplorePage = {
+  items: ExploreResultItem[];
+  page: number;
+  page_size: number;
+  mode: string;
+  has_next: boolean;
+  has_previous: boolean;
+  next_page: number | null;
+  total_hint: number | null;
+};
+
+export type EntityTypeInfo = {
+  code: string;
+  label: string;
+  icon: string;
+  searchable: boolean;
+  valid_relationship_target: boolean;
+  has_dedicated_page: boolean;
+};
+
+export type ExploreListParams = {
+  mode?: ExploreMode;
+  page?: number;
+  page_size?: number;
+  q?: string;
+  sort?: DocumentSort;
+  order?: SortOrder;
+  created_gte?: string;
+  created_lte?: string;
+  correspondent?: string;
+  document_type?: string;
+  tag?: string;
+  completeness?: CompletenessFilter;
+  relationship_type?: string;
+  person?: string;
+  organization?: string;
+  country?: string;
+  case?: string;
+};
 
 export type EntitySearchHit = {
   id: string | null;
@@ -146,6 +265,7 @@ export type IngestJob = {
   error_message: string | null;
   original_filename: string | null;
   content_sha256: string | null;
+  user_title?: string | null;
 };
 
 export type IngestJobsPage = {
@@ -305,6 +425,42 @@ export function fetchDocuments(params: DocumentListParams = {}) {
   return apiFetch<QueuePage>(`/ui/api/documents?${query}`);
 }
 
+/** Build query string for GET /ui/api/explore. */
+export function buildExploreQuery(params: ExploreListParams = {}): string {
+  const search = new URLSearchParams();
+  search.set("mode", params.mode ?? "documents");
+  search.set("page", String(params.page ?? 1));
+  if (params.page_size) search.set("page_size", String(params.page_size));
+  if (params.q?.trim()) search.set("q", params.q.trim());
+  if (params.sort) search.set("sort", params.sort);
+  if (params.order) search.set("order", params.order);
+  if (params.created_gte?.trim()) search.set("created_gte", params.created_gte.trim());
+  if (params.created_lte?.trim()) search.set("created_lte", params.created_lte.trim());
+  if (params.correspondent?.trim()) search.set("correspondent", params.correspondent.trim());
+  if (params.document_type?.trim()) search.set("document_type", params.document_type.trim());
+  if (params.tag?.trim()) search.set("tag", params.tag.trim());
+  if (params.completeness && params.completeness !== "any") {
+    search.set("completeness", params.completeness);
+  }
+  if (params.relationship_type?.trim()) {
+    search.set("relationship_type", params.relationship_type.trim());
+  }
+  if (params.person?.trim()) search.set("person", params.person.trim());
+  if (params.organization?.trim()) search.set("organization", params.organization.trim());
+  if (params.country?.trim()) search.set("country", params.country.trim());
+  if (params.case?.trim()) search.set("case", params.case.trim());
+  return search.toString();
+}
+
+export function fetchExplore(params: ExploreListParams = {}) {
+  const query = buildExploreQuery(params);
+  return apiFetch<ExplorePage>(`/ui/api/explore?${query}`);
+}
+
+export function fetchEntityTypes() {
+  return apiFetch<EntityTypeInfo[]>("/ui/api/entity-types");
+}
+
 /** Legacy helper: unclassified queue page. Prefer `fetchDocuments`. */
 export function fetchQueue(page = 1) {
   return fetchDocuments({ page, unclassified: true });
@@ -312,6 +468,10 @@ export function fetchQueue(page = 1) {
 
 export function fetchDocument(id: number) {
   return apiFetch<DocumentDetail>(`/ui/api/documents/${id}`);
+}
+
+export function fetchEntity(entityId: string) {
+  return apiFetch<EntityDetail>(`/ui/api/entities/${encodeURIComponent(entityId)}`);
 }
 
 export function fetchRelationshipTypes() {
@@ -355,6 +515,43 @@ export function removeRelationship(relationshipId: string, csrfToken: string) {
   return apiFetch<void>(
     `/ui/api/relationships/${relationshipId}`,
     { method: "DELETE" },
+    csrfToken,
+  );
+}
+
+export function deleteDocument(
+  paperlessId: number,
+  csrfToken: string,
+  options: { confirm?: boolean } = {},
+) {
+  const confirm = options.confirm ?? true;
+  return apiFetch<void>(
+    `/ui/api/documents/${paperlessId}`,
+    { method: "DELETE", body: JSON.stringify({ confirm }) },
+    csrfToken,
+  );
+}
+
+export function replaceDocument(
+  paperlessId: number,
+  file: File,
+  csrfToken: string,
+  options: { title?: string; reason?: string } = {},
+) {
+  const form = new FormData();
+  form.append("document", file);
+  if (options.title?.trim()) {
+    form.append("title", options.title.trim());
+  }
+  if (options.reason?.trim()) {
+    form.append("reason", options.reason.trim());
+  }
+  return apiFetch<IngestJob>(
+    `/ui/api/documents/${paperlessId}/replace`,
+    {
+      method: "POST",
+      body: form,
+    },
     csrfToken,
   );
 }
@@ -442,7 +639,7 @@ export async function retryIngestJob(jobId: string, csrfToken: string): Promise<
   });
 }
 
-/** Document-to-document relationship type codes. */
+/** @deprecated Prefer API `target_entity_types`; kept for older payloads. */
 export const DOCUMENT_TARGET_RELATIONSHIP_CODES = new Set([
   "derived-from",
   "has-derivative",
@@ -452,12 +649,20 @@ export const DOCUMENT_TARGET_RELATIONSHIP_CODES = new Set([
 
 export function relationshipTypesForTarget(
   types: RelationshipType[],
-  targetKind: "concept" | "document",
+  targetKind: string,
 ): RelationshipType[] {
-  if (targetKind === "document") {
-    return types.filter((item) => DOCUMENT_TARGET_RELATIONSHIP_CODES.has(item.code));
-  }
-  return types.filter((item) => !DOCUMENT_TARGET_RELATIONSHIP_CODES.has(item.code));
+  const wanted = targetKind.trim().toLowerCase();
+  return types.filter((item) => {
+    const targets = item.target_entity_types;
+    if (targets && targets.length > 0) {
+      return targets.map((code) => code.toLowerCase()).includes(wanted);
+    }
+    // Legacy fallback when seed constraints are absent.
+    if (wanted === "document") {
+      return DOCUMENT_TARGET_RELATIONSHIP_CODES.has(item.code);
+    }
+    return !DOCUMENT_TARGET_RELATIONSHIP_CODES.has(item.code);
+  });
 }
 
 export function formatCountStat(stat: CountStat): string {

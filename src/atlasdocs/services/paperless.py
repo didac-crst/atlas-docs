@@ -514,6 +514,17 @@ class PaperlessClient:
                     return value.strip()
         raise PaperlessUnavailableError("Paperless post_document response missing task id")
 
+    def delete_document(self, document_id: int, token: str) -> None:
+        """Delete via DELETE /api/documents/{id}/ using the caller's authorization."""
+        url = f"{self._base_url}/api/documents/{document_id}/"
+        response = self._request("DELETE", url, token)
+        if response.status_code in {200, 204}:
+            return
+        if response.status_code == 404:
+            # Already gone — treat as success for failure-safe cleanup after switch.
+            return
+        self._raise_for_status(response, document_id=document_id)
+
     def get_task(self, task_id: str, token: str) -> PaperlessTaskStatus:
         url = f"{self._base_url}/api/tasks/?{urlencode({'task_id': task_id})}"
         response = self._request("GET", url, token)

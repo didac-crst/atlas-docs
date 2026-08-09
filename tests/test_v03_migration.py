@@ -211,7 +211,18 @@ def test_sqlite_upgrade_preserves_entities_and_references_184_197(
 
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert version == "0005_ingest_resolve_states"
+        assert version == "0009_backfill_semantic_completeness"
+        cols = {col["name"] for col in sa_inspect(engine).get_columns("entities")}
+        assert "deleted_at" in cols
+        assert "deleted_by_label" in cols
+        tables = set(sa_inspect(engine).get_table_names())
+        assert "document_replacement_history" in tables
+        completeness = {
+            str(row[0]): str(row[1])
+            for row in conn.execute(text("SELECT id, semantic_completeness FROM entities"))
+        }
+        assert completeness[ids["entity_184"]] == "partial"
+        assert completeness[ids["entity_197"]] == "partial"
 
 
 def test_sqlite_downgrade_round_trips_when_safe(
@@ -342,7 +353,7 @@ def test_postgres_upgrade_preserves_entities_and_references_184_197(
 
         with engine.connect() as conn:
             version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert version == "0005_ingest_resolve_states"
+            assert version == "0009_backfill_semantic_completeness"
             length = conn.execute(
                 text(
                     """
@@ -353,8 +364,14 @@ def test_postgres_upgrade_preserves_entities_and_references_184_197(
                 )
             ).scalar_one()
             assert length == 64
+        cols = {col["name"] for col in sa_inspect(engine).get_columns("entities")}
+        assert "deleted_at" in cols
+        assert "deleted_by_label" in cols
+        tables = set(sa_inspect(engine).get_table_names())
+        assert "document_replacement_history" in tables
     finally:
         with engine.begin() as conn:
             conn.execute(text("DROP SCHEMA public CASCADE"))
             conn.execute(text("CREATE SCHEMA public"))
+        engine.dispose()
         engine.dispose()

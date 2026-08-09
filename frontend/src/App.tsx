@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { ApiError, disconnect, getSession, type SessionInfo } from "./api/client";
+import { AccountMenu } from "./components/AccountMenu";
 import { ConnectPage } from "./pages/ConnectPage";
+import { EntityDetailPage } from "./pages/EntityDetailPage";
+import { ExplorePage } from "./pages/ExplorePage";
 import { HomePage } from "./pages/HomePage";
 import { IngestPage } from "./pages/IngestPage";
 import { ReconcilePage } from "./pages/ReconcilePage";
@@ -74,6 +77,9 @@ export function App() {
 
   return (
     <div className="app-shell">
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
       <header className="site-header">
         <Link to={authenticated ? "/" : "/connect"} className="brand-block">
           <img src={markUrl} alt="" width={40} height={40} />
@@ -84,6 +90,16 @@ export function App() {
             <>
               <Link to="/" aria-current={path === "/" ? "page" : undefined}>
                 Home
+              </Link>
+              <Link
+                to="/explore"
+                aria-current={
+                  path.startsWith("/explore") || path.startsWith("/entities/")
+                    ? "page"
+                    : undefined
+                }
+              >
+                Explore
               </Link>
               <Link
                 to="/classify"
@@ -97,15 +113,10 @@ export function App() {
               >
                 Ingest
               </Link>
-              <Link
-                to="/reconcile"
-                aria-current={path.startsWith("/reconcile") ? "page" : undefined}
-              >
-                Reconcile
-              </Link>
-              <button type="button" onClick={onDisconnect}>
-                Disconnect
-              </button>
+              <AccountMenu
+                usernameLabel={session?.username_label}
+                onDisconnect={onDisconnect}
+              />
             </>
           ) : (
             <Link to="/connect" aria-current="page">
@@ -114,7 +125,7 @@ export function App() {
           )}
         </nav>
       </header>
-      <main className="main">
+      <main id="main-content" className="main" tabIndex={-1}>
         {bootError && session ? (
           <div className="banner banner-error" role="alert">
             {bootError}
@@ -148,6 +159,26 @@ export function App() {
             element={
               authenticated && session ? (
                 <IngestPage session={session} onSession={setSession} />
+              ) : (
+                <Navigate to="/connect" replace />
+              )
+            }
+          />
+          <Route
+            path="/explore"
+            element={
+              authenticated && session ? (
+                <ExplorePage session={session} />
+              ) : (
+                <Navigate to="/connect" replace />
+              )
+            }
+          />
+          <Route
+            path="/entities/:entityId"
+            element={
+              authenticated && session ? (
+                <EntityDetailPage session={session} />
               ) : (
                 <Navigate to="/connect" replace />
               )

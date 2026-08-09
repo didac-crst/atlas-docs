@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDocumentsQuery,
+  buildExploreQuery,
   filterConcepts,
   formatCountStat,
   jobNeedsPolling,
@@ -68,6 +69,30 @@ describe("buildDocumentsQuery", () => {
   });
 });
 
+describe("buildExploreQuery", () => {
+  it("defaults to documents mode and page 1", () => {
+    expect(buildExploreQuery()).toBe("mode=documents&page=1");
+  });
+
+  it("encodes explore filters and omits completeness=any", () => {
+    expect(
+      buildExploreQuery({
+        mode: "people",
+        page: 2,
+        q: " Ali ",
+        sort: "title",
+        order: "asc",
+        completeness: "any",
+        relationship_type: "concerns-person",
+        person: "Alice",
+        country: "Germany",
+      }),
+    ).toBe(
+      "mode=people&page=2&q=Ali&sort=title&order=asc&relationship_type=concerns-person&person=Alice&country=Germany",
+    );
+  });
+});
+
 describe("summarizeBulkResults", () => {
   it("aggregates statuses for operator feedback", () => {
     expect(
@@ -93,15 +118,40 @@ describe("jobNeedsPolling", () => {
 
 describe("relationshipTypesForTarget", () => {
   const types = [
-    { code: "source-country", name: "Source Country", target_ontology: "country", directionality: "directed", inverse: null },
-    { code: "derived-from", name: "Derived From", target_ontology: null, directionality: "directed", inverse: "has-derivative" },
+    {
+      code: "source-country",
+      name: "Source Country",
+      target_ontology: "country",
+      directionality: "directed",
+      inverse: null,
+      target_entity_types: ["country"],
+    },
+    {
+      code: "derived-from",
+      name: "Derived From",
+      target_ontology: null,
+      directionality: "directed",
+      inverse: "has-derivative",
+      target_entity_types: ["document"],
+    },
+    {
+      code: "document-type",
+      name: "Document Type",
+      target_ontology: "document-type",
+      directionality: "directed",
+      inverse: null,
+      target_entity_types: ["concept"],
+    },
   ];
 
-  it("filters document vs concept relationship types", () => {
+  it("filters using target_entity_types from the API", () => {
     expect(relationshipTypesForTarget(types, "document").map((t) => t.code)).toEqual([
       "derived-from",
     ]);
     expect(relationshipTypesForTarget(types, "concept").map((t) => t.code)).toEqual([
+      "document-type",
+    ]);
+    expect(relationshipTypesForTarget(types, "country").map((t) => t.code)).toEqual([
       "source-country",
     ]);
   });

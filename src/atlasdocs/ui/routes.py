@@ -9,6 +9,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     Header,
     HTTPException,
     Query,
@@ -21,15 +22,19 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from atlasdocs.api.routes import get_paperless_client
 from atlasdocs.api.schemas import (
     BulkRelationshipResultResponse,
     BulkRelationshipsRequest,
     BulkRelationshipsResponse,
     ConceptResponse,
     CreateRelationshipRequest,
+    DeleteDocumentRequest,
     DocumentResponse,
+    EntityResponse,
     EntitySearchHitResponse,
+    EntityTypeRegistryResponse,
+    ExplorePageResponse,
+    ExploreResultItemResponse,
     HomeSummaryResponse,
     CountStatResponse,
     RecentDocumentResponse,
@@ -43,6 +48,7 @@ from atlasdocs.api.schemas import (
     UnclassifiedDocumentResponse,
     UnclassifiedPageResponse,
 )
+from atlasdocs.api.routes import get_paperless_client, _serialize_entity
 from atlasdocs.config import UNCLASSIFIED_PAGE_SIZE
 from atlasdocs.db.session import get_db
 from atlasdocs.security.redact import redact_secrets
@@ -85,6 +91,7 @@ CSRF_HEADER = "X-CSRF-Token"
 class SessionResponse(BaseModel):
     authenticated: bool
     csrf_token: str
+    username_label: str | None = None
 
 
 class ConnectRequest(BaseModel):
@@ -203,6 +210,37 @@ def _serialize_document(document) -> DocumentResponse:
         document_type=document.document_type,
         open_url=document.open_url,
         relationships=[_serialize_relationship(item) for item in document.relationships],
+        semantic_completeness=getattr(document, "semantic_completeness", "empty") or "empty",
+    )
+
+
+def _serialize_explore_page(page) -> ExplorePageResponse:
+    return ExplorePageResponse(
+        items=[
+            ExploreResultItemResponse(
+                id=item.id,
+                label=item.label,
+                entity_type=item.entity_type,
+                semantic_completeness=item.semantic_completeness,
+                subtitle=item.subtitle,
+                paperless_document_id=item.paperless_document_id,
+                open_url=item.open_url,
+                preview_available=item.preview_available,
+                download_available=item.download_available,
+                relationship_summary=list(item.relationship_summary),
+                created_date=item.created_date,
+                correspondent=item.correspondent,
+                document_type=item.document_type,
+            )
+            for item in page.items
+        ],
+        page=page.page,
+        page_size=page.page_size,
+        mode=page.mode,
+        has_next=page.has_next,
+        has_previous=page.has_previous,
+        next_page=page.next_page,
+        total_hint=page.total_hint,
     )
 
 
@@ -218,6 +256,7 @@ def _serialize_job(job) -> IngestionJobResponse:
         error_message=job.error_message,
         original_filename=job.original_filename,
         content_sha256=job.content_sha256,
+        user_title=getattr(job, "user_title", None),
     )
 
 
@@ -243,6 +282,7 @@ def get_session(request: Request, db: Session = Depends(get_db)) -> JSONResponse
         SessionResponse(
             authenticated=ui_session.authenticated,
             csrf_token=ui_session.csrf_token,
+            username_label=ui_session.username_label if ui_session.authenticated else None,
         ),
         ui_session,
     )
@@ -290,7 +330,11 @@ def login(
         username_label=username,
     )
     return _json_with_session(
-        SessionResponse(authenticated=True, csrf_token=ui_session.csrf_token),
+        SessionResponse(
+            authenticated=True,
+            csrf_token=ui_session.csrf_token,
+            username_label=ui_session.username_label,
+        ),
         ui_session,
     )
 
@@ -315,7 +359,11 @@ def connect(
     store.delete(ui_session.id)
     ui_session = store.create(paperless_authorization=token)
     return _json_with_session(
-        SessionResponse(authenticated=True, csrf_token=ui_session.csrf_token),
+        SessionResponse(
+            authenticated=True,
+            csrf_token=ui_session.csrf_token,
+            username_label=ui_session.username_label,
+        ),
         ui_session,
     )
 
@@ -332,7 +380,7 @@ def disconnect(
         store.delete(ui_session.id)
     fresh = store.create()
     return _json_with_session(
-        SessionResponse(authenticated=False, csrf_token=fresh.csrf_token),
+        SessionResponse(authenticated=False, csrf_token=fresh.csrf_token, username_label=None),
         fresh,
     )
 
@@ -414,8 +462,101 @@ def search_entities(
             paperless_document_id=item.paperless_document_id,
             subtitle=item.subtitle,
             open_url=item.open_url,
+            semantic_completeness=item.semantic_completeness,
         )
         for item in hits
+    ]
+    response = JSONResponse(content=[item.model_dump() for item in payload])
+    set_session_cookie(response, ui_session)
+    return response
+
+
+@api_router.get("/entities/{entity_id}", response_model=EntityResponse)
+def get_entity_detail(
+    request: Request,
+    entity_id: str,
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    try:
+        entity = service.get_entity(entity_id, token=auth)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_entity(entity), ui_session)
+
+
+@api_router.get("/explore", response_model=ExplorePageResponse)
+def explore(
+    request: Request,
+    mode: str = Query(default="documents"),
+    page: int = Query(default=1, ge=1),
+    page_size: int | None = Query(default=None, ge=1, le=UNCLASSIFIED_PAGE_SIZE),
+    q: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc"),
+    created_gte: str | None = Query(default=None),
+    created_lte: str | None = Query(default=None),
+    correspondent: str | None = Query(default=None),
+    document_type: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    completeness: str | None = Query(default=None),
+    relationship_type: str | None = Query(default=None),
+    person: str | None = Query(default=None),
+    organization: str | None = Query(default=None),
+    country: str | None = Query(default=None),
+    case: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    try:
+        result = service.explore(
+            auth,
+            mode=mode,
+            page=page,
+            page_size=page_size,
+            q=q,
+            sort=sort,
+            order=order,
+            created_gte=created_gte,
+            created_lte=created_lte,
+            correspondent=correspondent,
+            document_type=document_type,
+            tag=tag,
+            completeness=completeness,
+            relationship_type=relationship_type,
+            person=person,
+            organization=organization,
+            country=country,
+            case=case,
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_explore_page(result), ui_session)
+
+
+@api_router.get("/entity-types", response_model=list[EntityTypeRegistryResponse])
+def list_entity_types(
+    request: Request,
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    try:
+        rows = service.list_entity_type_registry(auth)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    payload = [
+        EntityTypeRegistryResponse(
+            code=item.code,
+            label=item.label,
+            icon=item.icon,
+            searchable=item.searchable,
+            valid_relationship_target=item.valid_relationship_target,
+            has_dedicated_page=item.has_dedicated_page,
+        )
+        for item in rows
     ]
     response = JSONResponse(content=[item.model_dump() for item in payload])
     set_session_cookie(response, ui_session)
@@ -475,6 +616,8 @@ def list_documents(
                 created_date=item.created_date,
                 correspondent=item.correspondent,
                 document_type=item.document_type,
+                semantic_completeness=getattr(item, "semantic_completeness", None),
+                entity_id=getattr(item, "entity_id", None),
             )
             for item in result.items
         ],
@@ -630,6 +773,8 @@ def list_relationship_types(
             target_ontology=item.target_ontology,
             directionality=item.directionality,
             inverse=item.inverse,
+            source_entity_types=item.source_entity_types,
+            target_entity_types=item.target_entity_types,
         )
         for item in rows
     ]
@@ -661,6 +806,7 @@ def search_concepts(
 def ingest_upload(
     request: Request,
     document: UploadFile = File(...),
+    title: str | None = Form(default=None),
     x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
     db: Session = Depends(get_db),
     service: IngestionService = Depends(get_ui_ingest_service),
@@ -674,6 +820,7 @@ def ingest_upload(
             filename=document.filename or "upload.bin",
             file_obj=document.file,
             content_type=document.content_type or "application/octet-stream",
+            title=title,
             session_id=ui_session.id,
             created_by_label=ui_session.username_label,
         )
@@ -733,6 +880,73 @@ def retry_ingest_job(
     return _json_with_session(_serialize_job(job), ui_session)
 
 
+@api_router.delete("/documents/{paperless_document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_ui_document(
+    request: Request,
+    paperless_document_id: int,
+    payload: DeleteDocumentRequest,
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> Response:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        service.delete_document(
+            paperless_document_id,
+            token=auth,
+            confirm=payload.confirm,
+            actor_label=ui_session.username_label,
+        )
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    set_session_cookie(response, ui_session)
+    return response
+
+
+@api_router.post(
+    "/documents/{paperless_document_id}/replace",
+    response_model=IngestionJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def replace_ui_document(
+    request: Request,
+    paperless_document_id: int,
+    document: UploadFile = File(...),
+    title: str | None = Form(default=None),
+    reason: str | None = Form(default=None),
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: IngestionService = Depends(get_ui_ingest_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        job = service.enqueue_replace(
+            authorization=auth,
+            paperless_document_id=paperless_document_id,
+            filename=document.filename or "upload.bin",
+            file_obj=document.file,
+            content_type=document.content_type or "application/octet-stream",
+            title=title,
+            reason=reason,
+            session_id=ui_session.id,
+            created_by_label=ui_session.username_label,
+        )
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_job(job), ui_session, status_code=202)
+
+
 def _safe_download_filename(name: str | None, fallback: str) -> str:
     base = (name or fallback).replace('"', "").replace("\n", " ").replace("\r", " ").strip()
     base = base.split("/")[-1].split("\\")[-1] or fallback
@@ -755,7 +969,12 @@ def _stream_paperless_document(
     paperless_document_id: int,
     kind: str,
     disposition: str,
+    documents: DocumentService | None = None,
 ) -> StreamingResponse:
+    if documents is not None:
+        reference = documents.get_external_reference(paperless_document_id)
+        if reference is not None and reference.entity is not None and reference.entity.deleted_at is not None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     try:
         # Authz probe first so we never leak existence via stream errors.
         paperless.assert_accessible(paperless_document_id, auth)
@@ -790,6 +1009,7 @@ def _stream_paperless_document(
     headers = {
         "Cache-Control": "no-store",
         "Content-Disposition": f'{disposition}; filename="{safe_name}"',
+        "X-Content-Type-Options": "nosniff",
     }
     return StreamingResponse(chunks, media_type=content_type or "application/octet-stream", headers=headers)
 
@@ -800,6 +1020,7 @@ def preview_document(
     paperless_document_id: int,
     db: Session = Depends(get_db),
     paperless: PaperlessClient = Depends(get_paperless_client),
+    service: DocumentService = Depends(get_ui_service),
 ) -> StreamingResponse:
     _ui_session, auth = _require_ui_auth(request, db)
     return _stream_paperless_document(
@@ -808,6 +1029,7 @@ def preview_document(
         paperless_document_id=paperless_document_id,
         kind="preview",
         disposition="inline",
+        documents=service,
     )
 
 
@@ -817,6 +1039,7 @@ def download_document(
     paperless_document_id: int,
     db: Session = Depends(get_db),
     paperless: PaperlessClient = Depends(get_paperless_client),
+    service: DocumentService = Depends(get_ui_service),
 ) -> StreamingResponse:
     _ui_session, auth = _require_ui_auth(request, db)
     return _stream_paperless_document(
@@ -825,6 +1048,7 @@ def download_document(
         paperless_document_id=paperless_document_id,
         kind="download",
         disposition="attachment",
+        documents=service,
     )
 
 

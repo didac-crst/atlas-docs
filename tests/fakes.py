@@ -74,6 +74,10 @@ class FakePaperlessTransport(httpx.BaseTransport):
         # Override Content-Type for preview/download responses (415 tests).
         self.preview_content_type: str | None = None
         self.content_hashes: dict[str, int] = {}  # sha256 hex -> paperless id
+        self.deleted_document_ids: list[int] = []
+        self.delete_denied: set[int] = set()
+        self.delete_unauthorized: set[int] = set()
+        self.delete_server_error: set[int] = set()
 
     def _authorized(self, request: httpx.Request) -> bool:
         auth = request.headers.get("Authorization", "")
@@ -331,6 +335,21 @@ class FakePaperlessTransport(httpx.BaseTransport):
             return httpx.Response(200, content=content, headers=headers)
 
         document_id = int(path.split("/")[-1])
+        if request.method == "DELETE":
+            if not self._authorized(request):
+                return httpx.Response(401, json={"detail": "unauthorized"})
+            if document_id in self.delete_unauthorized:
+                return httpx.Response(401, json={"detail": "unauthorized"})
+            if document_id in self.delete_denied:
+                return httpx.Response(403, json={"detail": "forbidden"})
+            if document_id in self.delete_server_error:
+                return httpx.Response(503, json={"detail": "unavailable"})
+            if document_id not in self.documents:
+                return httpx.Response(404, json={"detail": "not found"})
+            del self.documents[document_id]
+            self.deleted_document_ids.append(document_id)
+            return httpx.Response(204)
+
         self.document_calls.append(document_id)
         if document_id in self.timeout:
             raise httpx.TimeoutException("timed out", request=request)

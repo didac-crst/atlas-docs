@@ -10,6 +10,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -65,6 +66,11 @@ class IngestionJobState(str, enum.Enum):
     failed = "FAILED"
 
 
+class IngestionJobKind(str, enum.Enum):
+    ingest = "ingest"
+    replace = "replace"
+
+
 ENTITY_TYPE_ENUM = Enum(
     EntityType,
     name="entity_type",
@@ -100,6 +106,13 @@ INGESTION_STATE_ENUM = Enum(
     native_enum=False,
     length=32,
 )
+INGESTION_KIND_ENUM = Enum(
+    IngestionJobKind,
+    name="ingestion_job_kind",
+    values_callable=lambda obj: [e.value for e in obj],
+    native_enum=False,
+    length=32,
+)
 
 EXTERNAL_SYSTEM_PAPERLESS = "paperless"
 
@@ -120,6 +133,11 @@ class Entity(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     entity_type: Mapped[EntityType] = mapped_column(ENTITY_TYPE_ENUM, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    semantic_completeness: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="empty", server_default="empty"
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     external_reference: Mapped[ExternalReference | None] = relationship(
         back_populates="entity", uselist=False
@@ -196,6 +214,8 @@ class RelationshipType(Base):
     inverse_relationship_type_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("relationship_types.id", ondelete="SET NULL"), nullable=True
     )
+    source_entity_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    target_entity_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     target_ontology: Mapped[Ontology | None] = relationship()
     inverse_relationship_type: Mapped[RelationshipType | None] = relationship(
@@ -265,11 +285,33 @@ class UiSession(Base):
         return bool(self.paperless_authorization_ciphertext)
 
 
+class DocumentReplacementHistory(Base):
+    __tablename__ = "document_replacement_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    previous_external_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    new_external_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    previous_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    new_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    actor_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     state: Mapped[IngestionJobState] = mapped_column(INGESTION_STATE_ENUM, nullable=False)
+    job_kind: Mapped[IngestionJobKind] = mapped_column(
+        INGESTION_KIND_ENUM,
+        nullable=False,
+        default=IngestionJobKind.ingest,
+        server_default="ingest",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     created_by_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -277,6 +319,7 @@ class IngestionJob(Base):
     token_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     token_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    user_title: Mapped[str | None] = mapped_column(String(512), nullable=True)
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     content_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     paperless_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -298,3 +341,7 @@ class IngestionJob(Base):
     entity_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("entities.id", ondelete="SET NULL"), nullable=True
     )
+    replace_of_entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("entities.id", ondelete="SET NULL"), nullable=True
+    )
+    replace_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)

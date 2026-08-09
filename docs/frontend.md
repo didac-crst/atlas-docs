@@ -61,18 +61,23 @@ header. The SPA does not send the Paperless token to those paths.
 
 | Path | Screen |
 | --- | --- |
-| `/ui/` | Home task chooser |
+| `/ui/` | Home launcher (global search, task queues, recent activity) |
+| `/ui/explore` | Explore browse (modes, filters, list/grid) |
+| `/ui/entities/:id` | Entity detail (concepts/people/orgs; documents redirect) |
 | `/ui/classify` | Searchable classification workbench + bulk assign |
 | `/ui/ingest` | Upload + ingestion job list |
-| `/ui/documents/:id` | Document detail + composer |
-| `/ui/reconcile` | Reconciliation |
+| `/ui/documents/:id` | Document detail + composer (Preview / Download / Replace / Delete / Open in Paperless) |
+| `/ui/reconcile` | Reconciliation (account menu; not primary nav) |
 | `/ui/connect` | Login / account |
+
+Primary product navigation: Home | Explore | Classify | Ingest. Reconcile and
+Disconnect live under the account menu.
 
 ## BFF endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/ui/api/session` | `{authenticated, csrf_token}` |
+| GET | `/ui/api/session` | `{authenticated, csrf_token, username_label}` |
 | POST | `/ui/api/login` | Username/password → server-side token |
 | POST | `/ui/api/connect` | Advanced token paste (dev fallback) |
 | POST | `/ui/api/disconnect` | Invalidate UI session |
@@ -80,10 +85,15 @@ header. The SPA does not send the Paperless token to those paths.
 | GET | `/ui/api/documents` | List with `q`, `classification`, `sort`, `order`, `page` |
 | POST | `/ui/api/documents/bulk-relationships` | Bulk assign (per-doc authz) |
 | GET | `/ui/api/documents/{id}` | Document detail + relationships |
+| DELETE | `/ui/api/documents/{id}` | Delete Paperless original + tombstone (`confirm` + CSRF) |
+| POST | `/ui/api/documents/{id}/replace` | Failure-safe replace upload (async job) |
 | POST | `/ui/api/documents/{id}/relationships` | Add relationship (prefer `target_entity_id`) |
 | DELETE | `/ui/api/relationships/{id}` | Remove relationship |
-| GET | `/ui/api/relationship-types` | Typed relationship catalog |
+| GET | `/ui/api/relationship-types` | Typed relationship catalog (source/target entity types) |
+| GET | `/ui/api/entity-types` | Entity type registry |
+| GET | `/ui/api/explore` | Entity-oriented Explore results |
 | GET | `/ui/api/entities/search` | Atlas entity autocomplete (`q`, `entity_type`, `ontology`) |
+| GET | `/ui/api/entities/{id}` | Entity detail with relationships, backlinks, related documents |
 | GET | `/ui/api/concepts` | Concept autocomplete (`q`, `ontology`) |
 | POST | `/ui/api/ingest` | Multipart upload → durable job |
 | GET | `/ui/api/ingest/jobs` | Current identity’s jobs |

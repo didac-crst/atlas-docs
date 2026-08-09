@@ -54,6 +54,7 @@ def test_seed_loads_ontologies_and_relationship_types(client: TestClient) -> Non
             "Bob",
             "Acme",
             "Contoso",
+            "Sample Case",
         }
         types = {t.code for t in session.scalars(select(RelationshipType))}
         assert types == {
@@ -62,6 +63,7 @@ def test_seed_loads_ontologies_and_relationship_types(client: TestClient) -> Non
             "concerns",
             "issued-by",
             "concerns-person",
+            "belongs-to",
             "related-to",
             "derived-from",
             "has-derivative",
@@ -85,8 +87,8 @@ def test_seed_is_idempotent(tmp_path: Path) -> None:
         seed_from_path(session, SEED_PATH)
         seed_from_path(session, SEED_PATH)
         session.commit()
-        assert len(list(session.scalars(select(Concept)))) == 9
-        assert len(list(session.scalars(select(RelationshipType)))) == 10
+        assert len(list(session.scalars(select(Concept)))) == 10
+        assert len(list(session.scalars(select(RelationshipType)))) == 11
     finally:
         session.close()
         reset_engine()
@@ -316,6 +318,7 @@ def test_relationship_types_and_concepts(client: TestClient) -> None:
         "concerns",
         "issued-by",
         "concerns-person",
+        "belongs-to",
         "related-to",
         "derived-from",
         "has-derivative",
@@ -326,6 +329,9 @@ def test_relationship_types_and_concepts(client: TestClient) -> None:
     assert by_code["related-to"]["directionality"] == "symmetric"
     assert by_code["replies-to"]["inverse"] == "answered-by"
     assert by_code["answered-by"]["inverse"] == "replies-to"
+    assert by_code["source-country"]["target_entity_types"] == ["country"]
+    assert by_code["replies-to"]["target_entity_types"] == ["document"]
+    assert by_code["belongs-to"]["target_entity_types"] == ["case"]
     concepts = client.get("/ontologies/country/concepts", headers=AUTH)
     assert concepts.status_code == 200
     assert {item["name"] for item in concepts.json()} == {"France", "Germany", "Spain"}
@@ -353,13 +359,18 @@ def test_symmetric_relationship_creates_companion_edge(client: TestClient) -> No
 
 
 def test_inverse_relationship_materializes_companion(client: TestClient) -> None:
-    created = client.post(
+    source = client.post(
         "/documents/184/relationships",
         headers=AUTH,
-        json={"relationship": "replies-to", "target": "Germany"},
+        json={"relationship": "document-type", "target": "payslip"},
+    ).json()["entity_id"]
+    created = client.post(
+        f"/entities/{source}/relationships",
+        headers=AUTH,
+        json={"relationship": "replies-to", "target_paperless_id": 185},
     )
     assert created.status_code == 201
-    assert created.json()["relationships"][0]["type"] == "replies-to"
+    assert any(rel["type"] == "replies-to" for rel in created.json()["relationships"])
 
     session = get_session_factory()()
     try:
@@ -371,7 +382,7 @@ def test_inverse_relationship_materializes_companion(client: TestClient) -> None
             )
         )
         by_code = {e.relationship_type.code: e for e in edges}
-        assert set(by_code) == {"answered-by", "replies-to"}
+        assert {"answered-by", "replies-to"} <= set(by_code)
         forward = by_code["replies-to"]
         inverse = by_code["answered-by"]
         assert inverse.source_entity_id == forward.target_entity_id

@@ -85,6 +85,7 @@ flowchart LR
 | | |
 | --- | --- |
 | [Architecture](docs/architecture.md) | Model, ownership, boundaries |
+| [Document lifecycle](docs/document-lifecycle.md) | Create, replace, delete, tombstone, completeness |
 | [Frontend](docs/frontend.md) | SPA, BFF, auth, brand |
 | [API](docs/api.md) | JSON + `/ui/api` surfaces |
 | [Paperless](docs/paperless-integration.md) | REST rules, `BASE` vs `PUBLIC` URL |

@@ -16,13 +16,22 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from atlasdocs.config import get_settings
-from atlasdocs.db.models import IngestionJob, IngestionJobState, as_aware, utcnow
+from atlasdocs.db.models import (
+    IngestionJob,
+    IngestionJobKind,
+    IngestionJobState,
+    as_aware,
+    utcnow,
+)
 from atlasdocs.security.redact import safe_error_message
 from atlasdocs.security.tokens import decrypt_token, encrypt_token, token_fingerprint
 from atlasdocs.services.documents import (
     ConflictError,
     DocumentService,
+    ForbiddenDocumentError,
+    NotFoundError,
     UnauthorizedError,
+    UpstreamError,
     ValidationError,
 )
 from atlasdocs.services.paperless import (
@@ -58,6 +67,7 @@ class IngestionJobView:
     error_message: str | None
     original_filename: str
     content_sha256: str
+    user_title: str | None = None
 
 
 def spool_dir() -> Path:
@@ -79,6 +89,16 @@ def _safe_basename(filename: str | None) -> str:
     return name[:512]
 
 
+def _normalize_user_title(title: str | None) -> str | None:
+    """Optional Paperless title. Never invent atlasdocs: UUID titles."""
+    if title is None:
+        return None
+    cleaned = " ".join(str(title).split()).strip()
+    if not cleaned:
+        return None
+    return cleaned[:512]
+
+
 def _job_view(job: IngestionJob) -> IngestionJobView:
     return IngestionJobView(
         id=str(job.id),
@@ -91,6 +111,7 @@ def _job_view(job: IngestionJob) -> IngestionJobView:
         error_message=job.error_message,
         original_filename=job.original_filename,
         content_sha256=job.content_sha256,
+        user_title=job.user_title,
     )
 
 
@@ -114,16 +135,29 @@ class IngestionService:
         filename: str,
         file_obj,
         content_type: str = "application/octet-stream",
+        title: str | None = None,
         session_id: str | None = None,
         created_by_label: str | None = None,
+        job_kind: IngestionJobKind = IngestionJobKind.ingest,
+        replace_of_entity_id: uuid.UUID | None = None,
+        replace_reason: str | None = None,
     ) -> IngestionJobView:
         if not authorization:
             raise UnauthorizedError("Authorization required")
+        if job_kind == IngestionJobKind.replace and replace_of_entity_id is None:
+            raise ValidationError("replace_of_entity_id is required for replace jobs")
+        if job_kind == IngestionJobKind.ingest and replace_of_entity_id is not None:
+            raise ValidationError("replace_of_entity_id is only valid for replace jobs")
         max_bytes = self._settings.ingest_max_upload_bytes
         job_id = uuid.uuid4()
         path = spool_path_for(job_id)
         digest = hashlib.sha256()
         size = 0
+        user_title = _normalize_user_title(title)
+        reason = None
+        if replace_reason is not None:
+            cleaned = " ".join(str(replace_reason).split()).strip()
+            reason = cleaned[:512] if cleaned else None
         try:
             with path.open("wb") as out:
                 while True:
@@ -141,15 +175,17 @@ class IngestionService:
                 raise ValidationError("Empty upload")
             sha = digest.hexdigest()
             fingerprint = token_fingerprint(authorization)
-            existing = self._find_duplicate(fingerprint, sha, authorization)
-            if existing is not None:
-                raise DuplicateIngestError(
-                    "Duplicate content already ingested",
-                    paperless_document_id=existing,
-                )
+            if job_kind == IngestionJobKind.ingest:
+                existing = self._find_duplicate(fingerprint, sha, authorization)
+                if existing is not None:
+                    raise DuplicateIngestError(
+                        "Duplicate content already ingested",
+                        paperless_document_id=existing,
+                    )
             job = IngestionJob(
                 id=job_id,
                 state=IngestionJobState.uploading,
+                job_kind=job_kind,
                 created_by_label=created_by_label,
                 session_id=session_id,
                 token_ciphertext=encrypt_token(
@@ -157,10 +193,15 @@ class IngestionService:
                 ),
                 token_fingerprint=fingerprint,
                 original_filename=_safe_basename(filename),
+                user_title=user_title,
                 content_sha256=sha,
                 content_size_bytes=size,
+                # Internal Atlas correlation only — never sent as Paperless title.
+                correlation_key=correlation_key_for(job_id),
                 attempt_count=0,
                 next_attempt_at=utcnow(),
+                replace_of_entity_id=replace_of_entity_id,
+                replace_reason=reason,
             )
             self._session.add(job)
             self._session.flush()
@@ -170,6 +211,39 @@ class IngestionService:
                 path.unlink(missing_ok=True)
             raise
 
+    def enqueue_replace(
+        self,
+        *,
+        authorization: str,
+        paperless_document_id: int,
+        filename: str,
+        file_obj,
+        content_type: str = "application/octet-stream",
+        title: str | None = None,
+        reason: str | None = None,
+        session_id: str | None = None,
+        created_by_label: str | None = None,
+    ) -> IngestionJobView:
+        """Upload a replacement file for an existing logical document entity."""
+        reference = self._documents.get_external_reference(paperless_document_id)
+        if reference is None or reference.entity is None:
+            raise NotFoundError("Document entity not found")
+        if reference.entity.deleted_at is not None:
+            raise NotFoundError("Document entity not found")
+        # Ensure caller can access the current backing document before enqueue.
+        self._documents._ensure_paperless_access(paperless_document_id, authorization)  # noqa: SLF001
+        return self.enqueue(
+            authorization=authorization,
+            filename=filename,
+            file_obj=file_obj,
+            content_type=content_type,
+            title=title,
+            session_id=session_id,
+            created_by_label=created_by_label,
+            job_kind=IngestionJobKind.replace,
+            replace_of_entity_id=reference.entity.id,
+            replace_reason=reason,
+        )
     def _find_duplicate(
         self, fingerprint: str, sha256: str, authorization: str
     ) -> int | None:
@@ -434,17 +508,19 @@ class IngestionWorker:
             return
 
         job.attempt_count += 1
-        correlation = correlation_key_for(job.id)
+        # Optional user title only. Never post atlasdocs:{uuid} as Paperless title.
+        paperless_title = _normalize_user_title(job.user_title)
         try:
             with path.open("rb") as handle:
                 task_id = self._paperless.post_document(
                     authorization,
                     filename=job.original_filename,
                     content=handle,
-                    title=correlation,
+                    title=paperless_title,
                 )
             job.paperless_task_id = task_id
-            job.correlation_key = correlation
+            if job.correlation_key is None:
+                job.correlation_key = correlation_key_for(job.id)
             job.state = IngestionJobState.processing
             if job.processing_started_at is None:
                 job.processing_started_at = utcnow()
@@ -570,16 +646,13 @@ class IngestionWorker:
             )
             return
 
-        correlation = job.correlation_key or correlation_key_for(job.id)
+        # Task payload document ids only. Do not correlate via Paperless title:
+        # AtlasDocs never writes atlasdocs:{uuid} into user-facing titles.
         doc_id: int | None = None
 
         try:
             status = self._paperless.get_task(job.paperless_task_id, authorization)
             doc_id = self._paperless.primary_document_id(status)
-            if doc_id is None:
-                doc_id = self._paperless.find_document_id_by_correlation_title(
-                    authorization, correlation
-                )
         except PaperlessAuthError:
             self._fail_terminal(job, "paperless_unauthorized", "Paperless authorization failed")
             return
@@ -628,6 +701,14 @@ class IngestionWorker:
                     job.resolution_started_at = utcnow()
             self._reschedule_resolving(job)
             return
+
+        kind = job.job_kind
+        if isinstance(kind, str):
+            kind = IngestionJobKind(kind)
+        if kind == IngestionJobKind.replace:
+            self._complete_replacement(job, authorization, doc_id)
+            return
+
         entity = self._documents.get_or_create_document_entity(doc_id)
         job.paperless_document_id = doc_id
         job.entity_id = entity.id
@@ -647,6 +728,72 @@ class IngestionWorker:
             job.state.value,
             doc_id,
         )
+
+    def _complete_replacement(
+        self, job: IngestionJob, authorization: str, doc_id: int
+    ) -> None:
+        if job.replace_of_entity_id is None:
+            self._fail_terminal(job, "replace_missing_entity", "Replace job missing target entity")
+            return
+        previous_checksum = self._previous_checksum_for_entity(job.replace_of_entity_id)
+        try:
+            entity = self._documents.complete_replacement(
+                job.replace_of_entity_id,
+                doc_id,
+                authorization,
+                previous_checksum=previous_checksum,
+                new_checksum=job.content_sha256,
+                actor_label=job.created_by_label,
+                reason=job.replace_reason,
+            )
+        except ForbiddenDocumentError:
+            self._fail_terminal(job, "paperless_unauthorized", "Replacement document inaccessible")
+            return
+        except NotFoundError:
+            self._reschedule_resolving(job)
+            return
+        except UpstreamError:
+            self._reschedule_resolving(job)
+            return
+        except (ConflictError, ValidationError) as exc:
+            self._fail_terminal(
+                job,
+                "replace_rejected",
+                safe_error_message(exc, fallback="Replacement rejected"),
+            )
+            return
+
+        job.paperless_document_id = doc_id
+        job.entity_id = entity.id
+        job.state = IngestionJobState.ready
+        job.token_ciphertext = None
+        job.locked_at = None
+        job.locked_by = None
+        job.updated_at = utcnow()
+        job.error_code = None
+        job.error_message = None
+        spool_path_for(job.id).unlink(missing_ok=True)
+        self._session.flush()
+        logger.info(
+            "replace job=%s task=%s state=%s document_id=%s entity=%s",
+            job.id,
+            task_id_fingerprint(job.paperless_task_id or ""),
+            job.state.value,
+            doc_id,
+            entity.id,
+        )
+
+    def _previous_checksum_for_entity(self, entity_id: uuid.UUID) -> str | None:
+        row = self._session.scalar(
+            select(IngestionJob)
+            .where(
+                IngestionJob.entity_id == entity_id,
+                IngestionJob.state == IngestionJobState.ready,
+                IngestionJob.content_sha256.is_not(None),
+            )
+            .order_by(IngestionJob.updated_at.desc())
+        )
+        return row.content_sha256 if row is not None else None
 
     def _fail_terminal(self, job: IngestionJob, code: str, message: str) -> None:
         job.state = IngestionJobState.failed

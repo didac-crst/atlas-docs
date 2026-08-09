@@ -25,6 +25,24 @@ class RelationshipResponse(BaseModel):
     source_entity_id: str | None = None
 
 
+class BacklinkResponse(BaseModel):
+    id: str
+    type: str
+    source: str
+    source_entity_id: str
+    origin: str
+    status: str
+    source_paperless_document_id: int | None = None
+
+
+class RelatedDocumentResponse(BaseModel):
+    paperless_document_id: int
+    entity_id: str
+    label: str
+    created_date: str | None = None
+    relationship_type: str | None = None
+
+
 class DocumentResponse(BaseModel):
     paperless_document_id: int
     entity_id: str | None = None
@@ -34,6 +52,7 @@ class DocumentResponse(BaseModel):
     document_type: str | None = None
     open_url: str | None = None
     relationships: list[RelationshipResponse]
+    semantic_completeness: str = "empty"
 
 
 class EntityResponse(BaseModel):
@@ -47,6 +66,11 @@ class EntityResponse(BaseModel):
     document_type: str | None = None
     open_url: str | None = None
     relationships: list[RelationshipResponse] = Field(default_factory=list)
+    display_type: str | None = None
+    semantic_completeness: str = "empty"
+    backlinks: list[BacklinkResponse] = Field(default_factory=list)
+    related_documents: list[RelatedDocumentResponse] = Field(default_factory=list)
+    backlinks_truncated: bool = False
 
 
 class UnclassifiedDocumentResponse(BaseModel):
@@ -55,6 +79,8 @@ class UnclassifiedDocumentResponse(BaseModel):
     created_date: str | None = None
     correspondent: str | None = None
     document_type: str | None = None
+    semantic_completeness: str | None = None
+    entity_id: str | None = None
 
 
 class UnclassifiedPageResponse(BaseModel):
@@ -98,6 +124,7 @@ class IngestionJobResponse(BaseModel):
     error_message: str | None = None
     original_filename: str | None = None
     content_sha256: str | None = None
+    user_title: str | None = None
 
 
 class IngestionJobsResponse(BaseModel):
@@ -139,6 +166,7 @@ class EntitySearchHitResponse(BaseModel):
     paperless_document_id: int | None = None
     subtitle: str | None = None
     open_url: str | None = None
+    semantic_completeness: str | None = None
 
 
 class RelationshipTypeResponse(BaseModel):
@@ -147,6 +175,44 @@ class RelationshipTypeResponse(BaseModel):
     target_ontology: str | None = None
     directionality: str = "directed"
     inverse: str | None = None
+    source_entity_types: list[str] | None = None
+    target_entity_types: list[str] | None = None
+
+
+class EntityTypeRegistryResponse(BaseModel):
+    code: str
+    label: str
+    icon: str
+    searchable: bool
+    valid_relationship_target: bool
+    has_dedicated_page: bool
+
+
+class ExploreResultItemResponse(BaseModel):
+    id: str | None = None
+    label: str
+    entity_type: str
+    semantic_completeness: str
+    subtitle: str | None = None
+    paperless_document_id: int | None = None
+    open_url: str | None = None
+    preview_available: bool = False
+    download_available: bool = False
+    relationship_summary: list[str] = Field(default_factory=list)
+    created_date: str | None = None
+    correspondent: str | None = None
+    document_type: str | None = None
+
+
+class ExplorePageResponse(BaseModel):
+    items: list[ExploreResultItemResponse]
+    page: int
+    page_size: int
+    mode: str
+    has_next: bool
+    has_previous: bool
+    next_page: int | None = None
+    total_hint: int | None = None
 
 
 class ConceptResponse(BaseModel):
@@ -169,3 +235,7 @@ class ReconcileResponse(BaseModel):
     inaccessible_in_paperless: list[int]
     errors: list[str]
     human_summary: str
+
+
+class DeleteDocumentRequest(BaseModel):
+    confirm: bool = False
