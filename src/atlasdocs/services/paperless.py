@@ -16,6 +16,8 @@ _CONTENT_DISPOSITION_FILENAME = re.compile(
 )
 
 _RESULT_DATA_KEYS = frozenset({"document_id", "duplicate_of"})
+_TITLE_SEARCH_PAGE_SIZE = 25
+_TITLE_SEARCH_MAX_PAGES = 50
 
 
 class PaperlessError(Exception):
@@ -422,35 +424,51 @@ class PaperlessClient:
 
         - unique AtlasDocs title (``atlasdocs:{job_uuid}``)
         - exactly one result whose ``title`` equals the correlation value
+          across **all** search pages
         - no filename / timing heuristics; ambiguous or mismatched hits → None
         """
         needle = (title or "").strip()
         if not needle:
             return None
-        params = {"title_search": needle, "page_size": 25}
-        url = f"{self._base_url}/api/documents/?{urlencode(params)}"
-        response = self._request("GET", url, token)
-        self._raise_for_status(response)
-        payload = self._parse_json(response)
-        if not isinstance(payload, dict):
-            raise PaperlessUnavailableError("Paperless returned malformed document list")
-        raw_results = payload.get("results")
-        if not isinstance(raw_results, list):
-            raise PaperlessUnavailableError("Paperless document list has invalid results")
 
         exact: list[int] = []
-        for row in raw_results:
-            if not isinstance(row, dict) or "id" not in row:
-                continue
-            row_title = str(row.get("title") or "").strip()
-            if row_title != needle:
-                continue
-            try:
-                exact.append(int(row["id"]))
-            except (TypeError, ValueError) as exc:
-                raise PaperlessUnavailableError(
-                    "Paperless document list has invalid results"
-                ) from exc
+        page = 1
+        while page <= _TITLE_SEARCH_MAX_PAGES:
+            params = {
+                "title_search": needle,
+                "page_size": _TITLE_SEARCH_PAGE_SIZE,
+                "page": page,
+            }
+            url = f"{self._base_url}/api/documents/?{urlencode(params)}"
+            response = self._request("GET", url, token)
+            self._raise_for_status(response)
+            payload = self._parse_json(response)
+            if not isinstance(payload, dict):
+                raise PaperlessUnavailableError("Paperless returned malformed document list")
+            raw_results = payload.get("results")
+            if not isinstance(raw_results, list):
+                raise PaperlessUnavailableError("Paperless document list has invalid results")
+
+            for row in raw_results:
+                if not isinstance(row, dict) or "id" not in row:
+                    continue
+                row_title = str(row.get("title") or "").strip()
+                if row_title != needle:
+                    continue
+                try:
+                    exact.append(int(row["id"]))
+                except (TypeError, ValueError) as exc:
+                    raise PaperlessUnavailableError(
+                        "Paperless document list has invalid results"
+                    ) from exc
+                if len(exact) > 1:
+                    return None
+
+            if not payload.get("next"):
+                break
+            page += 1
+        else:
+            raise PaperlessUnavailableError("Paperless title search pagination exceeded limit")
 
         if len(exact) != 1:
             return None
@@ -537,15 +555,17 @@ class PaperlessClient:
         """Stream preview or download bytes from Paperless without logging the body."""
         suffix = "preview" if kind == "preview" else "download"
         url = f"{self._base_url}/api/documents/{document_id}/{suffix}/"
+        client = httpx.Client(timeout=self._timeout, transport=self._transport)
         try:
-            client = httpx.Client(timeout=self._timeout, transport=self._transport)
             response = client.send(
                 client.build_request("GET", url, headers=self._headers(token)),
                 stream=True,
             )
         except httpx.TimeoutException as exc:
+            client.close()
             raise PaperlessUnavailableError("Paperless request timed out") from exc
         except httpx.HTTPError as exc:
+            client.close()
             raise PaperlessUnavailableError("Paperless request failed") from exc
 
         if response.status_code in {401, 403}:

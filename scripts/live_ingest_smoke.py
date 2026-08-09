@@ -34,11 +34,12 @@ import os
 import sys
 import time
 import uuid
+from http.cookiejar import CookieJar
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.parse import urlencode, urlparse
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 
 def _die(message: str, code: int = 2) -> None:
@@ -53,36 +54,63 @@ def _env(name: str, default: str | None = None) -> str | None:
     return str(value).strip()
 
 
+def _require_http_base(url: str, *, label: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        _die(f"{label} must be an http(s) URL")
+    return url.rstrip("/")
+
+
 def _task_fp(task_id: str) -> str:
     return hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:8]
 
 
-def _request(
-    method: str,
-    url: str,
-    *,
-    headers: dict[str, str] | None = None,
-    data: bytes | None = None,
-    timeout: float = 60.0,
-) -> tuple[int, Any]:
-    req = Request(url, data=data, headers=headers or {}, method=method)
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-            status = resp.status
-    except HTTPError as exc:
-        raw = exc.read() if exc.fp is not None else b""
-        status = exc.code
-    except URLError as exc:
-        _die(f"request failed: {type(exc.reason).__name__ if exc.reason else 'URLError'}")
-    if not raw:
-        return status, None
-    ctype_hint = raw[:1]
-    try:
-        return status, json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        # Never print bodies; only length for non-JSON.
-        return status, {"_non_json_bytes": len(raw), "_starts_with": ctype_hint.decode("latin-1", "replace")}
+def _looks_like_task_id(text: str) -> bool:
+    stripped = text.strip().strip('"')
+    return bool(stripped) and "\n" not in stripped and len(stripped) < 80 and "{" not in stripped
+
+
+class _HttpClient:
+    """Cookie-aware HTTP helper restricted to http(s) URLs."""
+
+    def __init__(self) -> None:
+        self._opener = build_opener(HTTPCookieProcessor(CookieJar()))
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        data: bytes | None = None,
+        timeout: float = 60.0,
+    ) -> tuple[int, Any]:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            _die("refusing non-http(s) request URL")
+        req = Request(url, data=data, headers=headers or {}, method=method)
+        try:
+            with self._opener.open(req, timeout=timeout) as resp:
+                raw = resp.read()
+                status = getattr(resp, "status", None) or resp.getcode()
+        except HTTPError as exc:
+            raw = exc.read() if exc.fp is not None else b""
+            status = exc.code
+        except URLError as exc:
+            _die(f"request failed: {type(exc.reason).__name__ if exc.reason else 'URLError'}")
+        if not raw:
+            return int(status), None
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return int(status), {"_non_json_bytes": len(raw)}
+        try:
+            return int(status), json.loads(text)
+        except json.JSONDecodeError:
+            # Paperless post_document often returns a bare quoted UUID string.
+            if _looks_like_task_id(text):
+                return int(status), text.strip().strip('"')
+            return int(status), {"_non_json_bytes": len(raw)}
 
 
 def _multipart(fields: dict[str, str], files: dict[str, tuple[str, bytes, str]]) -> tuple[bytes, str]:
@@ -110,7 +138,18 @@ def _multipart(fields: dict[str, str], files: dict[str, tuple[str, bytes, str]])
     return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
 
-def _paperless_token(base: str) -> str:
+def _parse_task_id(task_body: Any) -> str:
+    if isinstance(task_body, str):
+        return task_body.strip().strip('"')
+    if isinstance(task_body, dict):
+        for key in ("task_id", "id", "task"):
+            value = task_body.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
+def _paperless_token(http: _HttpClient, base: str) -> str:
     token = _env("PAPERLESS_TOKEN")
     if token:
         return token if token.lower().startswith(("token ", "bearer ")) else f"Token {token}"
@@ -118,9 +157,9 @@ def _paperless_token(base: str) -> str:
     password = _env("PAPERLESS_PASSWORD")
     if not user or not password:
         _die("set PAPERLESS_TOKEN or PAPERLESS_USERNAME+PAPERLESS_PASSWORD")
-    status, payload = _request(
+    status, payload = http.request(
         "POST",
-        f"{base.rstrip('/')}/api/token/",
+        f"{base}/api/token/",
         headers={"Content-Type": "application/json"},
         data=json.dumps({"username": user, "password": password}).encode(),
     )
@@ -134,27 +173,23 @@ def _emit(**fields: object) -> None:
 
 
 def smoke_paperless(base: str, fixture: Path, timeout: int) -> int:
-    auth = {"Authorization": _paperless_token(base)}
+    http = _HttpClient()
+    auth = {"Authorization": _paperless_token(http, base)}
     correlation = f"atlasdocs:{uuid.uuid4()}"
     body, content_type = _multipart(
         {"title": correlation},
         {"document": (fixture.name, fixture.read_bytes(), "application/pdf")},
     )
-    status, task_body = _request(
+    status, task_body = http.request(
         "POST",
-        f"{base.rstrip('/')}/api/documents/post_document/",
+        f"{base}/api/documents/post_document/",
         headers={**auth, "Content-Type": content_type},
         data=body,
         timeout=120,
     )
     if status >= 400:
         _die("paperless upload failed")
-    if isinstance(task_body, str):
-        task_id = task_body.strip().strip('"')
-    elif isinstance(task_body, dict):
-        task_id = str(task_body.get("task_id") or task_body.get("id") or "").strip()
-    else:
-        task_id = ""
+    task_id = _parse_task_id(task_body)
     if not task_id:
         _die("paperless upload missing task id")
 
@@ -163,11 +198,13 @@ def smoke_paperless(base: str, fixture: Path, timeout: int) -> int:
     error_code = None
     doc_id = None
     while time.time() < deadline:
-        status, payload = _request(
+        status, payload = http.request(
             "GET",
-            f"{base.rstrip('/')}/api/tasks/?{urlencode({'task_id': task_id})}",
+            f"{base}/api/tasks/?{urlencode({'task_id': task_id})}",
             headers=auth,
         )
+        if status >= 400:
+            _die("paperless task poll failed")
         rows = payload.get("results") if isinstance(payload, dict) else payload
         if not isinstance(rows, list) or not rows:
             time.sleep(1)
@@ -195,11 +232,13 @@ def smoke_paperless(base: str, fixture: Path, timeout: int) -> int:
         error_code = "timeout"
 
     if state == "RESOLVING_DOCUMENT":
-        status, payload = _request(
+        status, payload = http.request(
             "GET",
-            f"{base.rstrip('/')}/api/documents/?{urlencode({'title_search': correlation, 'page_size': 25})}",
+            f"{base}/api/documents/?{urlencode({'title_search': correlation, 'page_size': 25})}",
             headers=auth,
         )
+        if status >= 400:
+            _die("paperless title correlation failed")
         results = payload.get("results") if isinstance(payload, dict) else []
         exact = [
             item.get("id")
@@ -222,9 +261,8 @@ def smoke_paperless(base: str, fixture: Path, timeout: int) -> int:
         error_code=error_code,
         resolved=doc_id is not None,
     )
-    # Best-effort cleanup of smoke document (never print title/body).
     if doc_id is not None:
-        _request("DELETE", f"{base.rstrip('/')}/api/documents/{int(doc_id)}/", headers=auth)
+        http.request("DELETE", f"{base}/api/documents/{int(doc_id)}/", headers=auth)
     return 0 if state == "READY" else 1
 
 
@@ -235,21 +273,22 @@ def smoke_atlasdocs(atlas_base: str, fixture: Path, timeout: int) -> int:
     if not ((user and password) or token):
         _die("AtlasDocs mode needs username/password or PAPERLESS_TOKEN")
 
-    base = atlas_base.rstrip("/")
-    status, session = _request("GET", f"{base}/ui/api/session")
+    http = _HttpClient()
+    base = atlas_base
+    status, session = http.request("GET", f"{base}/ui/api/session")
     if status >= 400 or not isinstance(session, dict):
         _die("atlasdocs session failed")
     csrf = session.get("csrf_token")
 
     if user and password:
-        status, connected = _request(
+        status, connected = http.request(
             "POST",
             f"{base}/ui/api/login",
             headers={"Content-Type": "application/json"},
             data=json.dumps({"csrf_token": csrf, "username": user, "password": password}).encode(),
         )
     else:
-        status, connected = _request(
+        status, connected = http.request(
             "POST",
             f"{base}/ui/api/connect",
             headers={"Content-Type": "application/json"},
@@ -263,7 +302,7 @@ def smoke_atlasdocs(atlas_base: str, fixture: Path, timeout: int) -> int:
         {},
         {"document": (fixture.name, fixture.read_bytes(), "application/pdf")},
     )
-    status, job = _request(
+    status, job = http.request(
         "POST",
         f"{base}/ui/api/ingest",
         headers={"Content-Type": content_type, "X-CSRF-Token": str(csrf)},
@@ -284,7 +323,7 @@ def smoke_atlasdocs(atlas_base: str, fixture: Path, timeout: int) -> int:
     deadline = time.time() + timeout
     last = job
     while time.time() < deadline:
-        status, last = _request("GET", f"{base}/ui/api/ingest/jobs/{job_id}")
+        status, last = http.request("GET", f"{base}/ui/api/ingest/jobs/{job_id}")
         if status >= 400 or not isinstance(last, dict):
             _die("atlasdocs job poll failed")
         state = str(last.get("state") or "")
@@ -328,10 +367,10 @@ def main(argv: list[str] | None = None) -> int:
     atlas = _env("ATLASDOCS_BASE_URL")
     paperless = _env("PAPERLESS_BASE_URL")
     if atlas:
-        return smoke_atlasdocs(atlas, fixture, timeout)
+        return smoke_atlasdocs(_require_http_base(atlas, label="ATLASDOCS_BASE_URL"), fixture, timeout)
     if not paperless:
         _die("set ATLASDOCS_BASE_URL or PAPERLESS_BASE_URL")
-    return smoke_paperless(paperless, fixture, timeout)
+    return smoke_paperless(_require_http_base(paperless, label="PAPERLESS_BASE_URL"), fixture, timeout)
 
 
 if __name__ == "__main__":

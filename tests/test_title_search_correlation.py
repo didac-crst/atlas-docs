@@ -73,3 +73,26 @@ def test_title_search_mismatched_substring_only_returns_none(
     # title_search may return substring hits; exact title must still match.
     transport.documents[901] = {"id": 901, "title": "prefix-atlasdocs:job-1-suffix"}
     assert client.find_document_id_by_correlation_title("Token t", "atlasdocs:job-1") is None
+
+
+def test_title_search_cross_page_duplicate_exact_titles_returns_none(
+    client: PaperlessClient, transport: FakePaperlessTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import atlasdocs.services.paperless as paperless_mod
+
+    monkeypatch.setattr(paperless_mod, "_TITLE_SEARCH_PAGE_SIZE", 1)
+    transport.documents[901] = {"id": 901, "title": "atlasdocs:paged"}
+    transport.documents[902] = {"id": 902, "title": "atlasdocs:paged"}
+    assert client.find_document_id_by_correlation_title("Token t", "atlasdocs:paged") is None
+
+
+def test_title_search_exact_match_on_second_page(
+    client: PaperlessClient, transport: FakePaperlessTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import atlasdocs.services.paperless as paperless_mod
+
+    monkeypatch.setattr(paperless_mod, "_TITLE_SEARCH_PAGE_SIZE", 1)
+    # Substring-only hit on page 1, exact correlation on page 2.
+    transport.documents[901] = {"id": 901, "title": "noise-atlasdocs:paged-ok"}
+    transport.documents[902] = {"id": 902, "title": "atlasdocs:paged-ok"}
+    assert client.find_document_id_by_correlation_title("Token t", "atlasdocs:paged-ok") == 902
