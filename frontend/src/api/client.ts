@@ -1,6 +1,7 @@
 export type SessionInfo = {
   authenticated: boolean;
   csrf_token: string;
+  username_label?: string | null;
 };
 
 export type Relationship = {

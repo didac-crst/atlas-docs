@@ -61,20 +61,23 @@ header. The SPA does not send the Paperless token to those paths.
 
 | Path | Screen |
 | --- | --- |
-| `/ui/` | Home task chooser |
+| `/ui/` | Home launcher (global search, task queues, recent activity) |
 | `/ui/explore` | Explore browse (modes, filters, list/grid) |
 | `/ui/entities/:id` | Entity detail (concepts/people/orgs; documents redirect) |
 | `/ui/classify` | Searchable classification workbench + bulk assign |
 | `/ui/ingest` | Upload + ingestion job list |
 | `/ui/documents/:id` | Document detail + composer |
-| `/ui/reconcile` | Reconciliation |
+| `/ui/reconcile` | Reconciliation (account menu; not primary nav) |
 | `/ui/connect` | Login / account |
+
+Primary product navigation: Home | Explore | Classify | Ingest. Reconcile and
+Disconnect live under the account menu.
 
 ## BFF endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/ui/api/session` | `{authenticated, csrf_token}` |
+| GET | `/ui/api/session` | `{authenticated, csrf_token, username_label}` |
 | POST | `/ui/api/login` | Username/password → server-side token |
 | POST | `/ui/api/connect` | Advanced token paste (dev fallback) |
 | POST | `/ui/api/disconnect` | Invalidate UI session |

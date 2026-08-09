@@ -18,6 +18,14 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
     timeout: 15000,
   });
   await expect(page.getByText(/Work areas|Needs classification/i).first()).toBeVisible();
+  const primaryNav = page.getByRole("navigation", { name: /Primary/i });
+  await expect(primaryNav.getByRole("link", { name: /^Home$/i })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: /^Explore$/i })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: /^Classify$/i })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: /^Ingest$/i })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: /Reconcile/i })).toHaveCount(0);
+  await expect(primaryNav.getByRole("button", { name: /Disconnect/i })).toHaveCount(0);
+  await expect(page.getByRole("search")).toBeVisible();
   await expect(page.getByText(password)).toHaveCount(0);
   await expect(page.getByText(/e2e-exchanged-token/i)).toHaveCount(0);
 
@@ -112,7 +120,8 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   );
   await expect(paperless).toHaveAttribute("target", "_blank");
 
-  await page.getByRole("link", { name: /Reconcile/i }).first().click();
+  await page.getByRole("button", { name: /^ada$/i }).click();
+  await page.getByRole("menuitem", { name: /Reconcile/i }).click();
   await expect(page.getByRole("heading", { name: /reconciliation/i })).toBeVisible();
   await page.getByRole("button", { name: /Run reconciliation/i }).click();
   await expect(page.getByText(/Dry-run complete/i)).toBeVisible();

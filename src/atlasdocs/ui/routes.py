@@ -90,6 +90,7 @@ CSRF_HEADER = "X-CSRF-Token"
 class SessionResponse(BaseModel):
     authenticated: bool
     csrf_token: str
+    username_label: str | None = None
 
 
 class ConnectRequest(BaseModel):
@@ -280,6 +281,7 @@ def get_session(request: Request, db: Session = Depends(get_db)) -> JSONResponse
         SessionResponse(
             authenticated=ui_session.authenticated,
             csrf_token=ui_session.csrf_token,
+            username_label=ui_session.username_label if ui_session.authenticated else None,
         ),
         ui_session,
     )
@@ -327,7 +329,11 @@ def login(
         username_label=username,
     )
     return _json_with_session(
-        SessionResponse(authenticated=True, csrf_token=ui_session.csrf_token),
+        SessionResponse(
+            authenticated=True,
+            csrf_token=ui_session.csrf_token,
+            username_label=ui_session.username_label,
+        ),
         ui_session,
     )
 
@@ -352,7 +358,11 @@ def connect(
     store.delete(ui_session.id)
     ui_session = store.create(paperless_authorization=token)
     return _json_with_session(
-        SessionResponse(authenticated=True, csrf_token=ui_session.csrf_token),
+        SessionResponse(
+            authenticated=True,
+            csrf_token=ui_session.csrf_token,
+            username_label=ui_session.username_label,
+        ),
         ui_session,
     )
 
@@ -369,7 +379,7 @@ def disconnect(
         store.delete(ui_session.id)
     fresh = store.create()
     return _json_with_session(
-        SessionResponse(authenticated=False, csrf_token=fresh.csrf_token),
+        SessionResponse(authenticated=False, csrf_token=fresh.csrf_token, username_label=None),
         fresh,
     )
 

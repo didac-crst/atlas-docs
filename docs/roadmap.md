@@ -36,7 +36,7 @@ Phases (summary):
 | B | Semantic API: entity search, type registry, relationship constraints, completeness | Done |
 | C | Explore UI: nav, search/filters/sort/pagination, list/grid | Done |
 | D | Entity detail foundation and related context | Done |
-| E | Home launcher; move Reconcile/Disconnect out of primary nav; validation | |
+| E | Home launcher; move Reconcile/Disconnect out of primary nav; validation | Done |
 
 Also in scope for v0.6: document delete/replace via Paperless (failure-safe),
 and creation-time semantic completeness states (`empty` / `partial` /

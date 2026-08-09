@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FilePlus2, GitBranch, Compass, Tags } from "lucide-react";
+import { FilePlus2, GitBranch, Compass, Search, Tags } from "lucide-react";
 import {
   ApiError,
   fetchHome,
@@ -19,6 +19,7 @@ export function HomePage({ session: _session }: Props) {
   const [summary, setSummary] = useState<HomeSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -44,6 +45,14 @@ export function HomePage({ session: _session }: Props) {
     };
   }, [navigate]);
 
+  function onSearch(event: FormEvent) {
+    event.preventDefault();
+    const q = query.trim();
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    navigate(q ? `/explore?${params.toString()}` : "/explore");
+  }
+
   return (
     <section className="home-page" aria-labelledby="home-title">
       <div className="home-brand">
@@ -51,6 +60,27 @@ export function HomePage({ session: _session }: Props) {
         <h1 id="home-title">AtlasDocs</h1>
         <p className="muted">Semantic work surface for your documents.</p>
       </div>
+
+      <form className="home-search" role="search" onSubmit={onSearch}>
+        <label htmlFor="home-global-search" className="sr-only">
+          Search documents and concepts
+        </label>
+        <div className="home-search-row">
+          <Search size={18} aria-hidden />
+          <input
+            id="home-global-search"
+            type="search"
+            name="q"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search documents and concepts"
+            autoComplete="off"
+          />
+          <button type="submit" className="btn">
+            Search
+          </button>
+        </div>
+      </form>
 
       {error ? (
         <div className="banner banner-error" role="alert">
