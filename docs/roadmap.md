@@ -37,10 +37,10 @@ Phases (summary):
 | C | Explore UI: nav, search/filters/sort/pagination, list/grid | Done |
 | D | Entity detail foundation and related context | Done |
 | E | Home launcher; move Reconcile/Disconnect out of primary nav; validation | Done |
+| F | Document delete/replace lifecycle (tombstone, failure-safe replace, completeness) | Done |
 
-Also in scope for v0.6: document delete/replace via Paperless (failure-safe),
-and creation-time semantic completeness states (`empty` / `partial` /
-`classified` / `needs_review`) — see [document-lifecycle.md](document-lifecycle.md).
+Contract details: [v0.6 Explore and Semantic Workbench](v0.6-explore-semantic-workbench.md)
+· [document lifecycle](document-lifecycle.md).
 
 ## Explicitly deferred
 

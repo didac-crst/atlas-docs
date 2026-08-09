@@ -29,8 +29,10 @@ Router: `src/atlasdocs/api/routes.py`.
 | GET | `/documents` | List with `unclassified=true` and/or `classification`, `q`, `sort`, `order`, `page`, `completeness` |
 | POST | `/documents/bulk-relationships` | Bulk assign (per-doc Paperless authz) |
 | GET | `/documents/{paperless_document_id}` | Document facade + relationships |
+| DELETE | `/documents/{paperless_document_id}` | Delete Paperless original + tombstone (`{"confirm": true}`) |
+| POST | `/documents/{paperless_document_id}/replace` | Failure-safe replace upload → durable replace job |
 | POST | `/documents/{paperless_document_id}/relationships` | Add relationship (document facade) |
-| POST | `/ingest` | Multipart upload → durable job |
+| POST | `/ingest` | Multipart upload → durable job (new logical document / new entity) |
 | GET | `/ingest/jobs` | Jobs for the calling token fingerprint |
 | GET | `/ingest/jobs/{job_id}` | Job status |
 | GET | `/explore` | Entity-oriented Explore page (`mode`, filters, sort, pagination) |
@@ -72,6 +74,10 @@ curl 'http://localhost:8080/documents?unclassified=true&page=1&page_size=25' \
 
 - `open_url` is set only when `PAPERLESS_PUBLIC_URL` is configured; it never
   embeds credentials or uses `PAPERLESS_BASE_URL`.
+- Document **delete** requires body `{"confirm": true}`. Forbidden Paperless
+  deletes map to **404** (same non-leak rule as other document access).
+- **Replace** is an async ingestion job (`job_kind=replace`); poll
+  `/ingest/jobs/{id}` until `READY`. See [document-lifecycle.md](document-lifecycle.md).
 
 ## UI BFF
 

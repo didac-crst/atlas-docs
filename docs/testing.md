@@ -4,7 +4,7 @@
 
 | Layer | Location | Role |
 | --- | --- | --- |
-| Pytest | `tests/` | API, BFF, domain, migrations; Paperless mocked via `FakePaperlessTransport` |
+| Pytest | `tests/` | API, BFF, domain, migrations, document lifecycle; Paperless mocked via `FakePaperlessTransport` |
 | Vitest | `frontend/` | React unit tests |
 | Playwright | `e2e/` | Browser smoke (desktop + mobile) against local app + mocked Paperless |
 | Hygiene | CI | `git diff --check` + secret/credential scan on tracked source |
