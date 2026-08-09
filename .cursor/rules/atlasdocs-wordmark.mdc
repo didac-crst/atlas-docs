@@ -1,0 +1,21 @@
+---
+description: Official AtlasDocs wordmark per-letter Docs colors
+alwaysApply: true
+---
+
+# AtlasDocs wordmark colors
+
+The `Docs` part of the AtlasDocs wordmark must preserve the official per-letter color progression rather than using a single uniform color or a CSS gradient across the whole word.
+
+Use:
+
+- D: `#214FC8` (`--atlas-docs-d`)
+- o: `#1A6DC2` (`--atlas-docs-o`)
+- c: `#1A84BD` (`--atlas-docs-c`)
+- s: `#1EA6B1` (`--atlas-docs-s`)
+
+`Atlas` remains the existing dark navy brand color (`--brand-900`).
+
+Create this once in the shared `AtlasDocsWordmark` component and reuse it everywhere the branded product wordmark is displayed.
+
+Do not reproduce this styling for ordinary occurrences of "AtlasDocs" inside body text.

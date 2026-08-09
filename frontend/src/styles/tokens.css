@@ -10,6 +10,11 @@
   --brand-300: #22c7d8;
   --brand-200: #a8eaf2;
   --brand-100: #eaf8fb;
+  /* Official wordmark “Docs” letters — one flat color each, not a word gradient */
+  --atlas-docs-d: #214fc8;
+  --atlas-docs-o: #1a6dc2;
+  --atlas-docs-c: #1a84bd;
+  --atlas-docs-s: #1ea6b1;
   --background: #f7f9fc;
   --surface: #ffffff;
   --surface-alt: #f1f5f9;
@@ -245,8 +250,20 @@ textarea {
   color: var(--brand-900);
 }
 
-.atlas-docs-wordmark-docs {
-  color: var(--brand-400);
+.atlas-docs-wordmark-d {
+  color: var(--atlas-docs-d);
+}
+
+.atlas-docs-wordmark-o {
+  color: var(--atlas-docs-o);
+}
+
+.atlas-docs-wordmark-c {
+  color: var(--atlas-docs-c);
+}
+
+.atlas-docs-wordmark-s {
+  color: var(--atlas-docs-s);
 }
 
 .brand-block .atlas-docs-wordmark {

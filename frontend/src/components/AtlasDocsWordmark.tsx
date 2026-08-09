@@ -6,8 +6,8 @@ type Props = {
 };
 
 /**
- * Official AtlasDocs wordmark: Atlas in navy, Docs in brand blue/cyan.
- * Do not apply gradients to surrounding body copy.
+ * Official AtlasDocs wordmark: Atlas in navy, Docs as one color per letter
+ * (D→o→c→s stepped blue→cyan). Do not apply this styling to ordinary body copy.
  */
 export function AtlasDocsWordmark({
   labelled = true,
@@ -18,7 +18,7 @@ export function AtlasDocsWordmark({
   // Spans must be adjacent (no whitespace) so the accessible name is “AtlasDocs”.
   return (
     <Tag className={classes} aria-label={labelled ? "AtlasDocs" : undefined}>
-      <span className="atlas-docs-wordmark-atlas">Atlas</span><span className="atlas-docs-wordmark-docs">Docs</span>
+      <span className="atlas-docs-wordmark-atlas">Atlas</span><span className="atlas-docs-wordmark-d">D</span><span className="atlas-docs-wordmark-o">o</span><span className="atlas-docs-wordmark-c">c</span><span className="atlas-docs-wordmark-s">s</span>
     </Tag>
   );
 }
