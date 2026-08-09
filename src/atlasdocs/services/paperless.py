@@ -122,8 +122,10 @@ def _extract_document_ids_from_task_row(row: dict) -> list[int]:
             seen.add(doc_id)
             ids.append(doc_id)
 
+    # API v9 and earlier.
     add(row.get("related_document"))
 
+    # API v10+ consume tasks expose related_document_ids (+ structured result_data).
     related_ids = row.get("related_document_ids")
     if isinstance(related_ids, list):
         for item in related_ids:
@@ -132,7 +134,9 @@ def _extract_document_ids_from_task_row(row: dict) -> list[int]:
     result_data = row.get("result_data")
     if isinstance(result_data, dict):
         add(result_data.get("document_id"))
+        add(result_data.get("duplicate_of"))
 
+    # Legacy / mixed shapes: digit string or JSON blob in result.
     result = row.get("result")
     if isinstance(result, str):
         stripped = result.strip()
@@ -145,6 +149,7 @@ def _extract_document_ids_from_task_row(row: dict) -> list[int]:
                 parsed = None
             if isinstance(parsed, dict):
                 add(parsed.get("document_id"))
+                add(parsed.get("duplicate_of"))
 
     return ids
 
@@ -406,9 +411,23 @@ class PaperlessClient:
         except PaperlessUnavailableError:
             raise
 
-    def find_document_id_by_title(self, token: str, title: str) -> int | None:
-        """Return a document id only when title matches exactly one Paperless document."""
-        params = {"title__iexact": title, "page_size": 2}
+    def find_document_id_by_correlation_title(self, token: str, title: str) -> int | None:
+        """Resolve a document id via documented title_search + exact title match.
+
+        Paperless-ngx documents searching (API docs):
+        ``GET /api/documents/?title_search=...`` — title-only Tantivy search.
+
+        AtlasDocs never uses undocumented Django filters such as
+        ``title__iexact``. Correlation requires:
+
+        - unique AtlasDocs title (``atlasdocs:{job_uuid}``)
+        - exactly one result whose ``title`` equals the correlation value
+        - no filename / timing heuristics; ambiguous or mismatched hits → None
+        """
+        needle = (title or "").strip()
+        if not needle:
+            return None
+        params = {"title_search": needle, "page_size": 25}
         url = f"{self._base_url}/api/documents/?{urlencode(params)}"
         response = self._request("GET", url, token)
         self._raise_for_status(response)
@@ -418,15 +437,28 @@ class PaperlessClient:
         raw_results = payload.get("results")
         if not isinstance(raw_results, list):
             raise PaperlessUnavailableError("Paperless document list has invalid results")
-        if len(raw_results) != 1:
+
+        exact: list[int] = []
+        for row in raw_results:
+            if not isinstance(row, dict) or "id" not in row:
+                continue
+            row_title = str(row.get("title") or "").strip()
+            if row_title != needle:
+                continue
+            try:
+                exact.append(int(row["id"]))
+            except (TypeError, ValueError) as exc:
+                raise PaperlessUnavailableError(
+                    "Paperless document list has invalid results"
+                ) from exc
+
+        if len(exact) != 1:
             return None
-        row = raw_results[0]
-        if not isinstance(row, dict) or "id" not in row:
-            raise PaperlessUnavailableError("Paperless document list has invalid results")
-        try:
-            return int(row["id"])
-        except (TypeError, ValueError) as exc:
-            raise PaperlessUnavailableError("Paperless document list has invalid results") from exc
+        return exact[0]
+
+    def find_document_id_by_title(self, token: str, title: str) -> int | None:
+        """Backward-compatible alias for correlation title lookup."""
+        return self.find_document_id_by_correlation_title(token, title)
 
     def post_document(
         self,

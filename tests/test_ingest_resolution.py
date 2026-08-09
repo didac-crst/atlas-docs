@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from atlasdocs.config import get_settings
 from atlasdocs.db.models import Entity, ExternalReference, IngestionJob, IngestionJobState, as_aware, utcnow
@@ -146,6 +147,119 @@ def test_resolving_document_finds_doc_by_correlation_title(
         assert job.state == IngestionJobState.ready
         assert job.paperless_document_id == doc_id
         assert not spool_path_for(job_id).exists()
+        entity = db.get(Entity, job.entity_id)
+        assert entity is not None
+    finally:
+        db.close()
+
+
+def test_resolving_zero_title_matches_keeps_resolving(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    paperless_transport.omit_related_document_on_success = True
+    _connect(client)
+    job_id = _enqueue(client)
+    db = get_session_factory()()
+    try:
+        worker = _worker(db, paperless_transport)
+        assert worker.run_once() is True
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        assert job.state == IngestionJobState.resolving_document
+        # Leave document titled as filename (no exact correlation match).
+        job.next_attempt_at = utcnow() - timedelta(seconds=1)
+        job.locked_at = None
+        job.locked_by = None
+        db.commit()
+        assert worker.run_once() is True
+        db.refresh(job)
+        assert job.state == IngestionJobState.resolving_document
+        assert job.paperless_document_id is None
+        assert spool_path_for(job_id).exists()
+        assert job.token_ciphertext
+    finally:
+        db.close()
+
+
+def test_resolving_multiple_exact_title_matches_does_not_guess(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    paperless_transport.omit_related_document_on_success = True
+    _connect(client)
+    job_id = _enqueue(client)
+    correlation = correlation_key_for(job_id)
+    db = get_session_factory()()
+    try:
+        worker = _worker(db, paperless_transport)
+        assert worker.run_once() is True
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        upload = paperless_transport.uploaded_files[-1]
+        paperless_transport.documents[upload["document_id"]]["title"] = correlation
+        paperless_transport.documents[8801] = {"id": 8801, "title": correlation}
+        job.next_attempt_at = utcnow() - timedelta(seconds=1)
+        job.locked_at = None
+        job.locked_by = None
+        db.commit()
+        assert worker.run_once() is True
+        db.refresh(job)
+        assert job.state == IngestionJobState.resolving_document
+        assert job.paperless_document_id is None
+    finally:
+        db.close()
+
+
+def test_resolving_mismatched_substring_title_does_not_bind(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    paperless_transport.omit_related_document_on_success = True
+    _connect(client)
+    job_id = _enqueue(client)
+    correlation = correlation_key_for(job_id)
+    db = get_session_factory()()
+    try:
+        worker = _worker(db, paperless_transport)
+        assert worker.run_once() is True
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        upload = paperless_transport.uploaded_files[-1]
+        paperless_transport.documents[upload["document_id"]]["title"] = f"prefix-{correlation}-suffix"
+        job.next_attempt_at = utcnow() - timedelta(seconds=1)
+        job.locked_at = None
+        job.locked_by = None
+        db.commit()
+        assert worker.run_once() is True
+        db.refresh(job)
+        assert job.state == IngestionJobState.resolving_document
+        assert job.paperless_document_id is None
+    finally:
+        db.close()
+
+
+def test_entity_binding_idempotent_on_repeat_ready(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    _connect(client)
+    job_id = _enqueue(client)
+    db = get_session_factory()()
+    try:
+        worker = _worker(db, paperless_transport)
+        assert worker.run_once() is True
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        assert job.state == IngestionJobState.ready
+        doc_id = job.paperless_document_id
+        entity_id = job.entity_id
+        assert doc_id is not None and entity_id is not None
+        docs = DocumentService(
+            db, PaperlessClient(base_url="http://paperless.test", transport=paperless_transport)
+        )
+        again = docs.get_or_create_document_entity(doc_id)
+        assert again.id == entity_id
+        refs = db.scalars(
+            select(ExternalReference).where(ExternalReference.entity_id == entity_id)
+        ).all()
+        assert len(refs) == 1
     finally:
         db.close()
 

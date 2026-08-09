@@ -206,6 +206,7 @@ class FakePaperlessTransport(httpx.BaseTransport):
             page = int(query.get("page", ["1"])[0])
             page_size = int(query.get("page_size", [str(UNCLASSIFIED_PAGE_SIZE)])[0])
             q = (query.get("query") or [""])[0].strip().lower()
+            title_search = (query.get("title_search") or [""])[0]
             title_iexact = (query.get("title__iexact") or [""])[0]
             ordering = (query.get("ordering") or [""])[0]
             created_gte = (query.get("created__date__gte") or [""])[0]
@@ -213,6 +214,15 @@ class FakePaperlessTransport(httpx.BaseTransport):
             correspondent_q = (query.get("correspondent__name__icontains") or [""])[0].lower()
             doc_type_q = (query.get("document_type__name__icontains") or [""])[0].lower()
             ordered = list(self.documents.values())
+            search_mode = False
+            if title_search:
+                search_mode = True
+                needle = title_search.lower()
+                ordered = [
+                    item
+                    for item in ordered
+                    if needle in str(item.get("title") or "").lower()
+                ]
             if title_iexact:
                 ordered = [
                     item
@@ -220,6 +230,7 @@ class FakePaperlessTransport(httpx.BaseTransport):
                     if str(item.get("title") or "").lower() == title_iexact.lower()
                 ]
             if q:
+                search_mode = True
                 ordered = [
                     item
                     for item in ordered
@@ -275,6 +286,11 @@ class FakePaperlessTransport(httpx.BaseTransport):
                 ordered.sort(key=lambda item: item["id"], reverse=reverse)
             start = (page - 1) * page_size
             chunk = ordered[start : start + page_size]
+            if search_mode:
+                chunk = [
+                    {**item, "__search_hit__": {"score": 1.0, "rank": idx}}
+                    for idx, item in enumerate(chunk)
+                ]
             return httpx.Response(
                 200,
                 json={

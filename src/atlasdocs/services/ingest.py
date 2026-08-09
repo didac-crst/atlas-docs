@@ -577,7 +577,9 @@ class IngestionWorker:
             status = self._paperless.get_task(job.paperless_task_id, authorization)
             doc_id = self._paperless.primary_document_id(status)
             if doc_id is None:
-                doc_id = self._paperless.find_document_id_by_title(authorization, correlation)
+                doc_id = self._paperless.find_document_id_by_correlation_title(
+                    authorization, correlation
+                )
         except PaperlessAuthError:
             self._fail_terminal(job, "paperless_unauthorized", "Paperless authorization failed")
             return

@@ -57,7 +57,7 @@ calls so arbitrary strings cannot bypass auth.
 `atlasdocs.services.paperless.PaperlessClient` is a thin HTTP adapter:
 
 - `exchange_password` / `get_document` / `list_documents` / `post_document` /
-  `get_task` / `find_document_id_by_title` / `stream_document_file` /
+  `get_task` / `find_document_id_by_correlation_title` / `stream_document_file` /
   `assert_accessible` / `validate_token`
 - Resolves correspondent and document-type labels from nested objects or
   integer ids (cached secondary lookups)
@@ -67,6 +67,13 @@ calls so arbitrary strings cannot bypass auth.
 Uploads are accepted by AtlasDocs, forwarded via `POST /api/documents/post_document/`,
 and tracked until Paperless consume completes and AtlasDocs can bind a
 Paperless document id.
+
+Verified against deployed **Paperless-ngx 3.0.5** (API v10): consume task rows
+expose `related_document_ids` and `result_data.document_id` when populate
+succeeds, but those fields are **not always present**. There is no
+`related_document` key on API v10 task objects. AtlasDocs therefore polls the
+task to a terminal status, parses every documented id field, and falls back to
+documented title search when needed.
 
 ### Job FSM
 
@@ -82,6 +89,7 @@ Paperless document id.
 Spool files and encrypted job tokens are retained through `UPLOADING`,
 `PROCESSING`, and `RESOLVING_DOCUMENT`. They are deleted only on `READY` or
 terminal `FAILED`. `RETRYABLE_FAILURE` keeps both so a retry can resume.
+When a Paperless task id already exists, AtlasDocs never re-POSTs the upload.
 
 ### Correlation title strategy
 
@@ -92,14 +100,30 @@ atlasdocs:{job_uuid}
 ```
 
 The original filename is preserved as the multipart `document` filename and in
-AtlasDocs job metadata. When a Paperless task returns `SUCCESS` without a
-document id in `related_document`, `result`, or `result_data`, AtlasDocs
-enters `RESOLVING_DOCUMENT` and looks up exactly one document with
-`title__iexact=atlasdocs:{job_uuid}`.
+AtlasDocs job metadata. When a Paperless task returns terminal `SUCCESS`
+without a document id in any of:
 
-**Limitation:** AtlasDocs never matches by filename alone. If the task payload
-never exposes a document id and title correlation fails (duplicate titles,
-Paperless ignores the title field, etc.), the job moves to `RETRYABLE_FAILURE`.
+- `related_document` (API v9 and earlier)
+- `related_document_ids`
+- `result_data.document_id` / `result_data.duplicate_of`
+- digit / JSON `result`
+
+AtlasDocs enters `RESOLVING_DOCUMENT` and calls the documented title-only
+search:
+
+```text
+GET /api/documents/?title_search=atlasdocs:{job_uuid}
+```
+
+Then it keeps only results whose `title` **exactly equals** the correlation
+value and requires **exactly one** such hit. Zero matches, multiple exact
+matches, or substring-only hits are treated as unresolved (no guessing by
+filename or timing). AtlasDocs does **not** use undocumented filters such as
+`title__iexact`.
+
+**Limitation:** If the task payload never exposes a document id and title
+correlation fails (Paperless ignores the title field, index lag, etc.), the
+job moves to `RETRYABLE_FAILURE` with spool + token retained for retry.
 
 Duplicate detection: AtlasDocs SHA-256 at enqueue; Paperless remains the
 document duplicate authority on consume.
