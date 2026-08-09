@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
-from urllib.request import HTTPCookieProcessor, Request, build_opener
+from urllib.request import HTTPCookieProcessor, HTTPRedirectHandler, Request, build_opener
 
 
 def _die(message: str, code: int = 2) -> None:
@@ -70,11 +70,18 @@ def _looks_like_task_id(text: str) -> bool:
     return bool(stripped) and "\n" not in stripped and len(stripped) < 80 and "{" not in stripped
 
 
+class _DenyRedirects(HTTPRedirectHandler):
+    """Refuse redirects so Authorization is never replayed to another origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        raise HTTPError(req.full_url, code, "redirect refused", headers, fp)
+
+
 class _HttpClient:
-    """Cookie-aware HTTP helper restricted to http(s) URLs."""
+    """Cookie-aware HTTP helper restricted to http(s) URLs without redirects."""
 
     def __init__(self) -> None:
-        self._opener = build_opener(HTTPCookieProcessor(CookieJar()))
+        self._opener = build_opener(HTTPCookieProcessor(CookieJar()), _DenyRedirects())
 
     def request(
         self,
@@ -232,20 +239,28 @@ def smoke_paperless(base: str, fixture: Path, timeout: int) -> int:
         error_code = "timeout"
 
     if state == "RESOLVING_DOCUMENT":
-        status, payload = http.request(
-            "GET",
-            f"{base}/api/documents/?{urlencode({'title_search': correlation, 'page_size': 25})}",
-            headers=auth,
-        )
-        if status >= 400:
-            _die("paperless title correlation failed")
-        results = payload.get("results") if isinstance(payload, dict) else []
-        exact = [
-            item.get("id")
-            for item in (results or [])
-            if isinstance(item, dict) and str(item.get("title") or "").strip() == correlation
-        ]
-        if len(exact) == 1:
+        exact: list[object] = []
+        page = 1
+        while page <= 50:
+            status, payload = http.request(
+                "GET",
+                f"{base}/api/documents/?{urlencode({'title_search': correlation, 'page_size': 25, 'page': page})}",
+                headers=auth,
+            )
+            if status >= 400:
+                _die("paperless title correlation failed")
+            if not isinstance(payload, dict):
+                _die("paperless title correlation failed")
+            results = payload.get("results") if isinstance(payload.get("results"), list) else []
+            for item in results:
+                if isinstance(item, dict) and str(item.get("title") or "").strip() == correlation:
+                    exact.append(item.get("id"))
+                    if len(exact) > 1:
+                        break
+            if len(exact) > 1 or not payload.get("next"):
+                break
+            page += 1
+        if len(exact) == 1 and exact[0] is not None:
             doc_id = exact[0]
             state = "READY"
             error_code = None
