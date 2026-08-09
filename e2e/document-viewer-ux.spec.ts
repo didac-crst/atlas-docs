@@ -50,9 +50,9 @@ test("viewer open/close, escape, overflow trash, and no token leak", async ({ pa
   await expect(technical).toContainText("184");
 
   await dialog.getByRole("button", { name: /More actions/i }).click();
-  await expect(dialog.getByRole("menuitem", { name: /Open in Paperless/i })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /Open in Paperless/i })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(dialog.getByRole("menuitem", { name: /Open in Paperless/i })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: /Open in Paperless/i })).toHaveCount(0);
   await expect(dialog).toBeVisible();
 
   await dialog.getByRole("button", { name: /^Move to trash$/i }).click();

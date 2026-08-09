@@ -1,5 +1,6 @@
 import markUrl from "../assets/atlas-docs-mark.svg";
-import { PRODUCT_NAME, PRODUCT_SLOGAN } from "../brand";
+import { PRODUCT_SLOGAN } from "../brand";
+import { AtlasDocsWordmark } from "./AtlasDocsWordmark";
 
 type Props = {
   /** Heading level for the product name. */
@@ -26,7 +27,7 @@ export function ProductIdentity({
     <div className={`product-identity product-identity-${size}`}>
       <img src={markUrl} alt="" width={mark} height={mark} />
       <TitleTag id={titleId} className="product-identity-name">
-        {PRODUCT_NAME}
+        <AtlasDocsWordmark as="span" />
       </TitleTag>
       <p className="product-identity-slogan muted">{PRODUCT_SLOGAN}</p>
       {status ? (

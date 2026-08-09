@@ -30,7 +30,7 @@ describe("AppFooter", () => {
         <AppFooter />
       </MemoryRouter>,
     );
-    expect(screen.getByText(/^AtlasDocs$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^AtlasDocs$/i)).toBeInTheDocument();
     expect(screen.getByText(PRODUCT_SLOGAN)).toBeInTheDocument();
     expect(screen.getByText(/Powered by Paperless-ngx/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^About$/i })).toHaveAttribute("href", "/about");

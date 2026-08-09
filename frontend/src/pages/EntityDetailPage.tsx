@@ -11,6 +11,7 @@ import {
   type EntityDetail,
   type SessionInfo,
 } from "../api/client";
+import { PageLayout } from "../components/PageLayout";
 
 type Props = {
   session: SessionInfo;
@@ -119,6 +120,7 @@ export function EntityDetailPage({ session, onSession }: Props) {
   }
 
   return (
+    <PageLayout width="narrow">
     <section className="entity-detail-page" aria-labelledby="entity-title">
       <p className="entity-detail-back">
         <Link to="/explore?mode=knowledge">← Back to Explore</Link>
@@ -354,5 +356,6 @@ export function EntityDetailPage({ session, onSession }: Props) {
         </>
       ) : null}
     </section>
+    </PageLayout>
   );
 }

@@ -15,7 +15,7 @@ import {
   type SortOrder,
 } from "../api/client";
 import { ExploreResultCard } from "../components/ExploreResultCard";
-import { DocumentViewerModal } from "../components/DocumentViewerModal";
+import { DocumentModal } from "../components/DocumentModal";
 import { PageLayout } from "../components/PageLayout";
 
 type Props = {
@@ -58,7 +58,7 @@ function parseMode(value: string | null): ExploreMode {
 }
 
 function parseView(value: string | null): ExploreView {
-  return value === "grid" ? "grid" : "list";
+  return value === "list" ? "list" : "grid";
 }
 
 function parseCompleteness(value: string | null): CompletenessFilter {
@@ -233,7 +233,7 @@ export function ExplorePage({ session: _session }: Props) {
     };
     const params = new URLSearchParams();
     if (nextMode !== "documents") params.set("mode", nextMode);
-    if (nextView !== "list") params.set("view", nextView);
+    if (nextView === "list") params.set("view", "list");
     if (nextPage > 1) params.set("page", String(nextPage));
     if (nextFilters.q.trim()) params.set("q", nextFilters.q.trim());
     if (nextFilters.sort !== "created") params.set("sort", nextFilters.sort);
@@ -528,9 +528,10 @@ export function ExplorePage({ session: _session }: Props) {
         </>
       ) : null}
       {previewId ? (
-        <DocumentViewerModal
+        <DocumentModal
           paperlessDocumentId={previewId}
           title={previewTitle}
+          mode="explore"
           onClose={closePreview}
         />
       ) : null}

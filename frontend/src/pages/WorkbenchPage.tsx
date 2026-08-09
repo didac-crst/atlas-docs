@@ -21,8 +21,7 @@ import { BulkRelationshipForm } from "../components/BulkRelationshipForm";
 import { ClassifyBatchBar } from "../components/ClassifyBatchBar";
 import { Dialog } from "../components/Dialog";
 import { DocumentCard } from "../components/DocumentCard";
-import { DocumentClassifyPanel } from "../components/DocumentClassifyPanel";
-import { DocumentViewerModal } from "../components/DocumentViewerModal";
+import { DocumentModal } from "../components/DocumentModal";
 import { PageLayout } from "../components/PageLayout";
 
 export type QueueFilters = {
@@ -74,7 +73,7 @@ function parseOrder(value: string | null): SortOrder {
 }
 
 function parseView(value: string | null): ExploreView {
-  return value === "grid" ? "grid" : "list";
+  return value === "list" ? "list" : "grid";
 }
 
 function sortPreset(sort: DocumentSort, order: SortOrder): string {
@@ -215,7 +214,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
     if (merged.tag.trim()) params.set("tag", merged.tag.trim());
     if (merged.completeness !== "any") params.set("completeness", merged.completeness);
     const nextView = next.view ?? view;
-    if (nextView === "grid") params.set("view", "grid");
+    if (nextView === "list") params.set("view", "list");
     const nextPreview = next.preview === undefined ? previewId : next.preview;
     if (nextPreview) {
       params.set("preview", String(nextPreview));
@@ -574,28 +573,24 @@ export function WorkbenchPage({ session, onSession }: Props) {
         ) : null}
 
         {previewId ? (
-          <DocumentViewerModal
+          <DocumentModal
             paperlessDocumentId={previewId}
             title={previewTitle}
+            mode="classify"
             onClose={closePreview}
-            sidePanel={
-              <DocumentClassifyPanel
-                paperlessDocumentId={previewId}
-                csrfToken={session.csrf_token}
-                types={types}
-                onError={setError}
-                onChanged={async () => {
-                  await refreshCsrf();
-                  await reloadQueue();
-                }}
-                onDocumentDeleted={async () => {
-                  setNotice("Document deleted");
-                  closePreview();
-                  await refreshCsrf();
-                  await reloadQueue();
-                }}
-              />
-            }
+            csrfToken={session.csrf_token}
+            types={types}
+            onError={setError}
+            onChanged={async () => {
+              await refreshCsrf();
+              await reloadQueue();
+            }}
+            onDocumentDeleted={async () => {
+              setNotice("Document deleted");
+              closePreview();
+              await refreshCsrf();
+              await reloadQueue();
+            }}
           />
         ) : null}
 

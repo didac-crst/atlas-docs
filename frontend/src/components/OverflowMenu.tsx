@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
 
 type Props = {
@@ -6,20 +7,51 @@ type Props = {
   children: ReactNode;
 };
 
-/** Compact overflow / “more” menu for secondary document actions. */
+type MenuCoords = { top: number; left: number; minWidth: number };
+
+/** Compact overflow / “more” menu; panel is portaled above preview iframes. */
 export function OverflowMenu({ label = "More actions", children }: Props) {
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<MenuCoords | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) {
+      setCoords(null);
+      return;
+    }
+    function place() {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const panelWidth = Math.max(rect.width, 14 * 16);
+      const left = Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8);
+      setCoords({
+        top: rect.bottom + 4,
+        left: Math.max(8, left),
+        minWidth: panelWidth,
+      });
+    }
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
 
     function onPointerDown(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || panelRef.current?.contains(target)) {
+        return;
       }
+      setOpen(false);
     }
 
     function onKeyDown(event: KeyboardEvent) {
@@ -54,17 +86,27 @@ export function OverflowMenu({ label = "More actions", children }: Props) {
         <MoreHorizontal size={16} aria-hidden />
         <span className="overflow-menu-label">{label}</span>
       </button>
-      {open ? (
-        <div
-          className="overflow-menu-panel"
-          id={menuId}
-          role="menu"
-          aria-label={label}
-          onClick={() => setOpen(false)}
-        >
-          {children}
-        </div>
-      ) : null}
+      {open && coords
+        ? createPortal(
+            <div
+              ref={panelRef}
+              className="overflow-menu-panel overflow-menu-panel-portal"
+              id={menuId}
+              role="menu"
+              aria-label={label}
+              style={{
+                position: "fixed",
+                top: coords.top,
+                left: coords.left,
+                minWidth: coords.minWidth,
+              }}
+              onClick={() => setOpen(false)}
+            >
+              {children}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

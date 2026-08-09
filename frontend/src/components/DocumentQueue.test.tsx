@@ -48,24 +48,26 @@ describe("Classify collection primitives", () => {
     expect(onClear).toHaveBeenCalled();
   });
 
-  it("renders selectable document cards without Paperless ids as labels", async () => {
+  it("toggles selection via card click without checkboxes", async () => {
     const onPreview = vi.fn();
     const onToggle = vi.fn();
     renderWithRouter(
       <DocumentCard
         item={sampleItem}
-        view="list"
+        view="grid"
         onPreview={onPreview}
         selectable
         selected={false}
         onToggleSelect={onToggle}
       />,
     );
-    expect(screen.getByRole("button", { name: /^Payslip Germany$/i })).toBeInTheDocument();
-    expect(screen.queryByText(/^184$/)).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("checkbox", { name: /Select Payslip Germany/i }));
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    const card = screen.getByRole("article");
+    expect(card).toHaveAttribute("aria-selected", "false");
+    await userEvent.click(card);
     expect(onToggle).toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: /^Preview$/i }));
     expect(onPreview).toHaveBeenCalledWith(184, "Payslip Germany");
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 });

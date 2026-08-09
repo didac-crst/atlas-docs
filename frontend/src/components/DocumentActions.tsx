@@ -26,6 +26,8 @@ type Props = {
   onPreview?: () => void;
   /** When true, Preview is primary; otherwise Download. */
   preferPreview?: boolean;
+  /** Explore = safe read actions only; Classify = full classification chrome. */
+  mode?: "explore" | "classify";
 };
 
 const REPLACE_POLL_MS = 1500;
@@ -41,7 +43,9 @@ export function DocumentActions({
   onReplaced,
   onPreview,
   preferPreview = true,
+  mode = "classify",
 }: Props) {
+  const exploreOnly = mode === "explore";
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
@@ -169,69 +173,79 @@ export function DocumentActions({
   return (
     <>
       <div className="doc-actions">
-        {primaryPreview}
-        {secondaryDownload}
-        {onAddRelationship ? (
-          <button type="button" className="btn btn-secondary" onClick={onAddRelationship}>
-            <Link2 size={16} aria-hidden /> Add relationship
-          </button>
-        ) : (
-          <a className="btn btn-secondary" href="#relationship-composer">
-            <Link2 size={16} aria-hidden /> Add relationship
+        {exploreOnly ? (
+          <a className="btn btn-primary" href={downloadHref} download>
+            <Download size={16} aria-hidden /> Download
           </a>
+        ) : (
+          <>
+            {primaryPreview}
+            {secondaryDownload}
+            {onAddRelationship ? (
+              <button type="button" className="btn btn-secondary" onClick={onAddRelationship}>
+                <Link2 size={16} aria-hidden /> Add relationship
+              </button>
+            ) : (
+              <a className="btn btn-secondary" href="#relationship-composer">
+                <Link2 size={16} aria-hidden /> Add relationship
+              </a>
+            )}
+            {isEvidence && document.trashed ? (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={restoreBusy}
+                onClick={() => void onRestoreDocument()}
+              >
+                <RotateCcw size={16} aria-hidden /> Restore
+              </button>
+            ) : null}
+          </>
         )}
-        {isEvidence && document.trashed ? (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={restoreBusy}
-            onClick={() => void onRestoreDocument()}
-          >
-            <RotateCcw size={16} aria-hidden /> Restore
-          </button>
-        ) : null}
 
         <OverflowMenu>
-          <OverflowItem
-            href={documentDownloadUrl(document.paperless_document_id, { original: true })}
-            download
-          >
-            <Download size={16} aria-hidden /> Download original
-          </OverflowItem>
-          {versions.length > 0 ? (
-            <div className="overflow-menu-section" role="none">
-              <label className="field overflow-version-field">
-                <span>Version</span>
-                <select
-                  value={selectedVersionId === "" ? "" : String(selectedVersionId)}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setSelectedVersionId(value ? Number(value) : "");
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  {versions.map((version) => (
-                    <option key={version.id} value={version.id}>
-                      Version {version.id}
-                      {version.created ? ` · ${version.created}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {versionDownloadHref ? (
-                <OverflowItem href={versionDownloadHref} download>
-                  <Download size={16} aria-hidden /> Download selected version
+          {exploreOnly ? null : (
+            <>
+              <OverflowItem
+                href={documentDownloadUrl(document.paperless_document_id, { original: true })}
+                download
+              >
+                <Download size={16} aria-hidden /> Download original
+              </OverflowItem>
+              {versions.length > 0 ? (
+                <div className="overflow-menu-section" role="none">
+                  <label className="field overflow-version-field">
+                    <span>Version</span>
+                    <select
+                      value={selectedVersionId === "" ? "" : String(selectedVersionId)}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setSelectedVersionId(value ? Number(value) : "");
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {versions.map((version) => (
+                        <option key={version.id} value={version.id}>
+                          Version {version.id}
+                          {version.created ? ` · ${version.created}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {versionDownloadHref ? (
+                    <OverflowItem href={versionDownloadHref} download>
+                      <Download size={16} aria-hidden /> Download selected version
+                    </OverflowItem>
+                  ) : null}
+                </div>
+              ) : null}
+              {isEvidence && !document.trashed ? (
+                <OverflowItem onSelect={() => setReplaceOpen(true)}>
+                  <FileInput size={16} aria-hidden /> Replace document
                 </OverflowItem>
               ) : null}
-            </div>
-          ) : null}
-          {isEvidence && !document.trashed ? (
-            <OverflowItem
-              onSelect={() => setReplaceOpen(true)}
-            >
-              <FileInput size={16} aria-hidden /> Replace document
-            </OverflowItem>
-          ) : null}
+            </>
+          )}
           {document.open_url ? (
             <OverflowItem href={document.open_url} external>
               <ExternalLink size={16} aria-hidden /> Open in Paperless
@@ -246,7 +260,7 @@ export function DocumentActions({
           </OverflowItem>
         </OverflowMenu>
 
-        {isEvidence ? (
+        {!exploreOnly && isEvidence ? (
           <button
             ref={deleteTriggerRef}
             type="button"
@@ -259,7 +273,7 @@ export function DocumentActions({
         ) : null}
       </div>
 
-      {replaceOpen ? (
+      {!exploreOnly && replaceOpen ? (
         <Dialog title="Replace document" onClose={() => setReplaceOpen(false)} role="dialog">
           <p className="muted">
             Upload another representation of the same document. Atlas identity and relationships are

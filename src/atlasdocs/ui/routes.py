@@ -1290,12 +1290,19 @@ def spa_root() -> Response:
 
 
 @router.get("/connect")
+@router.get("/about")
+@router.get("/explore")
 @router.get("/reconcile")
 @router.get("/classify")
 @router.get("/ingest")
 @router.get("/documents/{paperless_document_id}")
-def spa_client_routes(paperless_document_id: int | None = None) -> Response:
+@router.get("/entities/{entity_id}")
+def spa_client_routes(
+    paperless_document_id: int | None = None,
+    entity_id: str | None = None,
+) -> Response:
     _ = paperless_document_id
+    _ = entity_id
     return spa_index_response()
 
 

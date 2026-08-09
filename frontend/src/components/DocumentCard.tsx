@@ -1,17 +1,18 @@
-import { Download, Eye } from "lucide-react";
+import { Check, Download, Eye } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   documentDownloadUrl,
   type ExploreResultItem,
 } from "../api/client";
 import { documentPreviewUrl } from "../api/client";
+import type { KeyboardEvent, MouseEvent } from "react";
 
 type Props = {
   item: ExploreResultItem;
   view: "list" | "grid";
   /** Prefer opening the in-app preview modal instead of navigating away. */
   onPreview?: (paperlessDocumentId: number, title: string) => void;
-  /** Classify (and other queues): multi-select checkbox. */
+  /** Classify (and other queues): whole-card multi-select. */
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
@@ -53,6 +54,13 @@ function typeLabel(entityType: string): string {
   }
 }
 
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return Boolean(
+    target.closest("a, button, input, select, textarea, label, [role='button']"),
+  );
+}
+
 /** Shared document/entity result card for Explore, Classify, search, and relationship picks. */
 export function DocumentCard({
   item,
@@ -81,20 +89,35 @@ export function DocumentCard({
     }
   }
 
+  function onCardClick(event: MouseEvent) {
+    if (!selectable || !isDocument) return;
+    if (isInteractiveTarget(event.target)) return;
+    onToggleSelect?.();
+  }
+
+  function onCardKeyDown(event: KeyboardEvent) {
+    if (!selectable || !isDocument) return;
+    if (event.key === " " || event.key === "Enter") {
+      event.preventDefault();
+      onToggleSelect?.();
+    }
+  }
+
   return (
     <article
-      className={`doc-card doc-card-${view}${selected ? " doc-card-selected" : ""}`}
+      className={`doc-card doc-card-${view}${selected ? " doc-card-selected" : ""}${
+        selectable && isDocument ? " doc-card-selectable" : ""
+      }`}
       data-entity-type={item.entity_type}
+      aria-selected={selectable && isDocument ? selected : undefined}
+      tabIndex={selectable && isDocument ? 0 : undefined}
+      onClick={onCardClick}
+      onKeyDown={onCardKeyDown}
     >
-      {selectable && isDocument ? (
-        <label className="doc-card-check">
-          <span className="sr-only">Select {title}</span>
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={() => onToggleSelect?.()}
-          />
-        </label>
+      {selectable && isDocument && selected ? (
+        <span className="doc-card-selected-mark" aria-hidden>
+          <Check size={16} />
+        </span>
       ) : null}
 
       {isDocument ? (
@@ -180,11 +203,7 @@ export function DocumentCard({
       {isDocument ? (
         <div className="doc-card-actions">
           {onPreview ? (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={openDocument}
-            >
+            <button type="button" className="btn btn-secondary" onClick={openDocument}>
               <Eye size={16} aria-hidden /> Preview
             </button>
           ) : item.preview_available ? (

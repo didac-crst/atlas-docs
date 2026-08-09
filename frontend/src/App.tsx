@@ -3,6 +3,7 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-r
 import { ApiError, disconnect, getSession, type SessionInfo } from "./api/client";
 import { AccountMenu } from "./components/AccountMenu";
 import { AppFooter } from "./components/AppFooter";
+import { AtlasDocsWordmark } from "./components/AtlasDocsWordmark";
 import { ProductIdentity } from "./components/ProductIdentity";
 import { AboutPage } from "./pages/AboutPage";
 import { ConnectPage } from "./pages/ConnectPage";
@@ -86,7 +87,7 @@ export function App() {
       <header className="site-header">
         <Link to={authenticated ? "/" : "/connect"} className="brand-block">
           <img src={markUrl} alt="" width={40} height={40} />
-          <strong>AtlasDocs</strong>
+          <AtlasDocsWordmark as="strong" />
         </Link>
         <div className="site-header-end">
           <nav className="site-nav" aria-label="Primary">

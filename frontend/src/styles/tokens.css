@@ -204,8 +204,21 @@ textarea {
 }
 
 .site-footer-brand {
-  margin: 0 0 var(--space-1);
-  font-size: 0.9rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: 0.95rem;
+}
+
+.site-footer-sep {
+  color: var(--text-muted);
+}
+
+.site-footer-motto {
+  font-weight: 400;
 }
 
 .site-footer-credit,
@@ -218,6 +231,24 @@ textarea {
   color: var(--text-secondary);
 }
 
+.atlas-docs-wordmark {
+  display: inline;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.atlas-docs-wordmark-atlas {
+  color: var(--brand-900);
+}
+
+.atlas-docs-wordmark-docs {
+  color: var(--brand-400);
+}
+
+.brand-block .atlas-docs-wordmark {
+  font-size: 1.25rem;
+}
+
 .connect-auth-note {
   margin: var(--space-3) 0 0;
   font-size: 0.85rem;
@@ -225,13 +256,12 @@ textarea {
 }
 
 .about-page {
-  max-width: 36rem;
   margin: 1.5rem auto 0;
 }
 
 .about-body {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
 .about-stack {
@@ -239,16 +269,37 @@ textarea {
   padding-left: 1.25rem;
 }
 
-.about-manifesto-text {
-  white-space: pre-wrap;
-  font-family: inherit;
-  font-size: 0.95rem;
-  line-height: 1.5;
-  margin: var(--space-3) 0 0;
-  padding: var(--space-3);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+.about-manifesto h2 {
+  margin: 0 0 var(--space-4);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.about-manifesto-quote {
+  margin: 0;
+  padding: var(--space-5) 0 var(--space-5) var(--space-5);
+  border: 0;
+  border-left: 3px solid color-mix(in srgb, var(--brand-400) 55%, var(--border));
+  background: transparent;
+  font-size: 1.05rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.about-manifesto-quote p {
+  margin: 0 0 var(--space-4);
+}
+
+.about-manifesto-quote p:last-of-type {
+  margin-bottom: var(--space-3);
+}
+
+.about-manifesto-quote footer {
+  margin-top: var(--space-4);
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .site-nav {
@@ -700,6 +751,20 @@ textarea {
   justify-content: center;
   gap: var(--space-2);
   text-decoration: none;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    color var(--motion),
+    box-shadow var(--motion),
+    transform var(--motion);
+}
+
+.btn:hover:not(:disabled) {
+  box-shadow: 0 1px 2px rgb(16 38 68 / 8%);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
 }
 
 .btn-primary {
@@ -707,10 +772,19 @@ textarea {
   color: white;
 }
 
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.04);
+}
+
 .btn-secondary {
   background: var(--surface);
   border-color: var(--border);
   color: var(--text-primary);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-alt);
+  border-color: color-mix(in srgb, var(--brand-700) 28%, var(--border));
 }
 
 .btn-ghost {
@@ -722,6 +796,16 @@ textarea {
 .btn-ghost:hover:not(:disabled) {
   color: var(--text-primary);
   background: var(--surface-alt);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .btn:active:not(:disabled),
+  .doc-card-selectable,
+  .doc-card-selectable:active {
+    transition: none;
+    transform: none;
+  }
 }
 
 .doc-action-advanced {
@@ -807,7 +891,6 @@ textarea {
 
 .home-page,
 .home-chooser {
-  max-width: 40rem;
   margin: 1.5rem auto 0;
 }
 
@@ -993,7 +1076,6 @@ textarea {
 .ingest-layout {
   display: grid;
   gap: var(--space-5);
-  max-width: 56rem;
 }
 
 .job-table-wrap {
@@ -1065,7 +1147,6 @@ textarea {
 .explore-page {
   display: grid;
   gap: var(--space-5);
-  max-width: 72rem;
 }
 
 .explore-header {
@@ -1213,7 +1294,6 @@ a.explore-card-title:hover {
 .entity-detail-page {
   display: grid;
   gap: var(--space-5);
-  max-width: 48rem;
 }
 
 .entity-detail-back a {
@@ -1373,11 +1453,13 @@ a.explore-card-title:hover {
   border-left: 1px solid var(--border);
 }
 
+.document-modal-panel,
 .document-classify-panel {
   display: grid;
   gap: var(--space-4);
 }
 
+.document-modal-panel .doc-title,
 .document-classify-panel .doc-title {
   font-size: 1.15rem;
 }
@@ -1442,17 +1524,6 @@ a.explore-card-title:hover {
   margin: 0 0 var(--space-2);
 }
 
-.doc-card-check {
-  display: flex;
-  align-items: start;
-  padding-top: 0.35rem;
-}
-
-.doc-card-selected {
-  border-color: color-mix(in srgb, var(--brand-700, #1e4a7a) 45%, var(--border));
-  background: color-mix(in srgb, var(--brand-100, #e8eef6) 40%, var(--surface));
-}
-
 button.doc-card-title-btn {
   appearance: none;
   background: none;
@@ -1477,9 +1548,6 @@ button.doc-card-title-btn:hover {
 }
 
 .overflow-menu-panel {
-  position: absolute;
-  right: 0;
-  top: calc(100% + var(--space-1));
   min-width: 14rem;
   padding: var(--space-2);
   display: grid;
@@ -1488,7 +1556,10 @@ button.doc-card-title-btn:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: 0 8px 24px rgb(16 38 68 / 12%);
-  z-index: 50;
+}
+
+.overflow-menu-panel-portal {
+  z-index: 120;
 }
 
 .overflow-menu-item {
@@ -1536,6 +1607,45 @@ button.doc-card-title-btn:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
+  position: relative;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    box-shadow var(--motion),
+    transform var(--motion);
+}
+
+.doc-card-selectable {
+  cursor: pointer;
+}
+
+.doc-card-selectable:hover {
+  border-color: color-mix(in srgb, var(--brand-700) 35%, var(--border));
+}
+
+.doc-card-selectable:active {
+  transform: translateY(1px) scale(0.995);
+}
+
+.doc-card-selected {
+  border-color: var(--brand-700);
+  background: color-mix(in srgb, var(--brand-100) 70%, var(--surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand-400) 45%, transparent);
+}
+
+.doc-card-selected-mark {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: var(--brand-700);
+  color: white;
+  pointer-events: none;
 }
 
 .doc-card-thumb {
@@ -1622,10 +1732,6 @@ a.doc-card-title:hover {
 .doc-card-list {
   grid-template-columns: minmax(5.5rem, 7.5rem) minmax(0, 1fr) auto;
   align-items: start;
-}
-
-.doc-card-list:has(.doc-card-check) {
-  grid-template-columns: auto minmax(5.5rem, 7.5rem) minmax(0, 1fr) auto;
 }
 
 .doc-card-grid .doc-card-thumb {

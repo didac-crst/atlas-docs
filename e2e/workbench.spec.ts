@@ -66,6 +66,15 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
     "aria-selected",
     "true",
   );
+  await expect(page.getByRole("button", { name: /^Grid$/i })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByRole("button", { name: /^List$/i }).click();
+  await expect(page.getByRole("button", { name: /^List$/i })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await page.getByRole("button", { name: /^Grid$/i }).click();
   await expect(page.getByRole("button", { name: /^Grid$/i })).toHaveAttribute(
     "aria-pressed",
@@ -109,9 +118,8 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   await expect(page.getByText(/No unclassified documents|No documents|shown/i).first()).toBeVisible();
 
   const checkboxes = page.locator('input[type="checkbox"]');
-  await expect(checkboxes.nth(1)).toBeVisible({ timeout: 15000 });
-  await checkboxes.nth(0).check(); // select page
-  // After select page, open batch actions
+  await expect(checkboxes.first()).toBeVisible({ timeout: 15000 });
+  await checkboxes.first().check(); // Select page
   await expect(page.getByRole("region", { name: /Batch actions/i })).toBeVisible();
   await page.getByRole("button", { name: /Add relationship/i }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -137,14 +145,14 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   );
   await expect(dialog.getByRole("button", { name: /^Move to trash$/i })).toBeVisible();
   await dialog.getByRole("button", { name: /More actions/i }).click();
-  const paperless = dialog.getByRole("menuitem", { name: /Open in Paperless/i });
+  const paperless = page.getByRole("menuitem", { name: /Open in Paperless/i });
   await expect(paperless).toHaveAttribute(
     "href",
     "http://paperless.example.test/documents/184/",
   );
   await expect(paperless).toHaveAttribute("target", "_blank");
   await page.keyboard.press("Escape");
-  await expect(dialog.getByRole("menuitem", { name: /Open in Paperless/i })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: /Open in Paperless/i })).toHaveCount(0);
 
   await dialog.getByRole("button", { name: /^Move to trash$/i }).click();
   await expect(page.getByRole("alertdialog")).toBeVisible();

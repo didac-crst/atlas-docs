@@ -16,7 +16,7 @@ describe("DocumentViewerModal", () => {
     render(
       <DocumentViewerModal paperlessDocumentId={184} title="Payslip" onClose={onClose} />,
     );
-    expect(screen.getByRole("status")).toHaveTextContent(/Loading preview/i);
+    expect(screen.getByText(/Loading preview/i)).toBeInTheDocument();
     expect(await screen.findByTitle(/Preview of Payslip/i)).toHaveAttribute(
       "src",
       "/ui/api/documents/184/preview",
