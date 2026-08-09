@@ -14,11 +14,14 @@ Reconciliation:
    run (no redundant per-id GET).
 4. On a **full** run (`limit` unset), GETs AtlasDocs Paperless references that
    were **not** seen in the listing and reports missing (404) or inaccessible
-   (401/403) ids.
-5. **Never deletes** relationships, entities, or external references.
-6. Skips **tombstoned** entities (`deleted_at` set) when classifying
-   `missing_in_paperless`, so intentional AtlasDocs deletes are not reported as
-   orphans.
+   (401/403) ids. Missing refs that are also absent from trash are reported in
+   `purged_in_paperless` when they appear purged relative to prior Atlas state.
+5. Scans Paperless trash and reports `trashed_in_paperless`, syncing Atlas
+   `trashed_at` for Evidence still present in trash.
+6. **Never deletes** relationships, entities, or external references.
+7. Skips **tombstoned** entities (`deleted_at` set) when classifying
+   `missing_in_paperless`, so intentional AtlasDocs permanent deletes are not
+   reported as orphans.
 
 Limited runs (`limit` set) focus on create/scan; orphan verification is deferred
 to a full pass.
@@ -29,7 +32,8 @@ Intentional delete/replace flows are documented in
 ## Safety rule
 
 Automatic deletion is forbidden. Operators must inspect
-`missing_in_paperless` / `inaccessible_in_paperless` and decide manually.
+`missing_in_paperless` / `inaccessible_in_paperless` /
+`trashed_in_paperless` / `purged_in_paperless` and decide manually.
 
 ## Service abstraction
 

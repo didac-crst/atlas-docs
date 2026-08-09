@@ -55,11 +55,12 @@ export function ReconcilePage({ session, onSession }: Props) {
   return (
     <section className="panel" aria-labelledby="reconcile-title">
       <h1 id="reconcile-title">
-        <GitBranch size={20} aria-hidden /> Paperless reconciliation
+        <GitBranch size={20} aria-hidden /> Reconciliation
       </h1>
       <p className="muted">
-        Creates missing AtlasDocs document entities and Paperless external references. Missing or
-        inaccessible Paperless documents are reported; semantic data is never deleted.
+        Creates missing AtlasDocs document entities and external references for documents in
+        Paperless. Missing or inaccessible source documents are reported; semantic data is never
+        deleted.
       </p>
       {error ? (
         <div className="banner banner-error" role="alert">

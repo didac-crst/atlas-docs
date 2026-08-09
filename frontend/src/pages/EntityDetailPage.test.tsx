@@ -32,6 +32,8 @@ describe("EntityDetailPage", () => {
       relationships: [],
       display_type: "person",
       semantic_completeness: "empty",
+      lifecycle_category: "master_data",
+      archived: false,
       backlinks: [
         {
           id: "bl-1",
@@ -59,7 +61,12 @@ describe("EntityDetailPage", () => {
         <Routes>
           <Route
             path="/entities/:entityId"
-            element={<EntityDetailPage session={{ authenticated: true, csrf_token: "csrf" }} />}
+            element={
+              <EntityDetailPage
+                session={{ authenticated: true, csrf_token: "csrf" }}
+                onSession={() => undefined}
+              />
+            }
           />
         </Routes>
       </MemoryRouter>,

@@ -58,6 +58,14 @@ export function AccountMenu({ usernameLabel, onDisconnect }: Props) {
       {open ? (
         <div className="account-menu-panel" id={menuId} role="menu" aria-label="Account">
           <Link
+            to="/about"
+            role="menuitem"
+            className="account-menu-item"
+            onClick={() => setOpen(false)}
+          >
+            About
+          </Link>
+          <Link
             to="/reconcile"
             role="menuitem"
             className="account-menu-item"

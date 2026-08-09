@@ -4,47 +4,67 @@ Forward-looking milestones and explicitly deferred work. Implemented behavior
 is documented in [architecture.md](architecture.md) and related canonical docs.
 Historical milestone plans live under [archive/](archive/).
 
-## Current baseline (v0.5)
+## Current baseline (v0.6 + v0.7 pending merge)
 
 - Entity + ExternalReference core; entity relationship API and document facade
 - Deterministic Paperless reconciliation without auto-delete
-- React workbench with home, classify (search/filter/bulk), ingest, reconcile
+- React workbench: Home | Explore | Classify | Ingest; Account menu for
+  Reconcile / Disconnect
 - Password login → server-side token; PostgreSQL sessions; encrypted job tokens
-- Durable async ingestion worker (`atlasdocs worker ingest`) with document
-  resolution (`RESOLVING_DOCUMENT`), retryable failures, and spool retention
-  until READY
+- Durable async ingestion worker with document resolution and spool retention
 - Document Preview / Download BFF proxies (session-authenticated; no Paperless
   token in the browser)
+- Explore (documents and concepts), entity detail with backlinks, semantic
+  completeness, document delete/replace with tombstones and replacement history
+- v0.7 lifecycle categories, Evidence trash via Paperless, Master Data
+  safeguards, Explore Documents | Knowledge, and product identity (implemented
+  on `feat/v07-product-experience`; treat as baseline once merged)
 
 Design contracts:
-[v0.5 ingestion & classification](v0.5-ingestion-classification-spec.md)
-· [ADR 0002](adr/0002-v05-session-ingest-security.md)
-· [v0.5 product UX refinement](v0.5-product-ux-refinement.md) (home summaries, entity autocomplete, document header).
+[v0.6 Explore and Semantic Workbench](v0.6-explore-semantic-workbench.md)
+· [document lifecycle](document-lifecycle.md)
+· [v0.5 ingestion & classification](v0.5-ingestion-classification-spec.md)
+· [ADR 0002](adr/0002-v05-session-ingest-security.md).
 
-## Next sprint (v0.6)
+## v0.7 (implemented, pending release)
 
-**Explore and semantic workbench** — make AtlasDocs the primary exploration and
-classification interface while Paperless remains the document authority.
+**Product experience and entity lifecycle** — make AtlasDocs feel like an
+entity-centered semantic application rather than a document queue with semantic
+fields. Establish lifecycle categories and navigation foundations without the
+full future knowledge graph.
 
-Contract: [v0.6 Explore and Semantic Workbench](v0.6-explore-semantic-workbench.md).
+Contracts:
+
+- [Product experience specification](product-experience-spec.md) (long-term UX /
+  lifecycle model; future vision marked explicitly)
+- [Product identity](product-identity.md) (AtlasDocs-first branding, slogan, About)
+- [v0.7 Product Experience and Entity Lifecycle](v0.7-product-experience.md)
+  (sprint phases, tests, acceptance)
 
 Phases (summary):
 
 | Phase | Focus | Status |
 | --- | --- | --- |
-| A | Document experience: optional titles (no `atlasdocs:` UUID titles), inline preview | Done |
-| B | Semantic API: entity search, type registry, relationship constraints, completeness | Done |
-| C | Explore UI: nav, search/filters/sort/pagination, list/grid | Done |
-| D | Entity detail foundation and related context | Done |
-| E | Home launcher; move Reconcile/Disconnect out of primary nav; validation | Done |
-| F | Document delete/replace lifecycle (tombstone, failure-safe replace, completeness) | Done |
+| A | Lifecycle category foundation | Done |
+| B | Canonical cards and Explore Documents \| Knowledge | Done |
+| C | Version-aware downloads and progressive disclosure | Done |
+| D | Evidence trash / restore / permanent delete | Done |
+| E | Master Data rename / archive / merge contract | Done |
+| F | Collection reconcile, hardening, docs | Done |
 
-Contract details: [v0.6 Explore and Semantic Workbench](v0.6-explore-semantic-workbench.md)
-· [document lifecycle](document-lifecycle.md).
+Shipped focus: lifecycle categories (Evidence / Master Data / Organizational);
+Explore Documents | Knowledge with canonical cards; evidence trash via Paperless;
+Master Data archive/merge safeguards; collection-level reconciliation;
+version-aware Paperless downloads through the BFF (`original` / `version` —
+Paperless version ids, not Atlas UUIDs); AtlasDocs product identity (slogan,
+login/home/footer/About).
+
+Do **not** treat the full product-experience vision (graph viewer, Perspectives,
+timelines, full merge UI) as shipped — see Explicitly deferred.
 
 ## Explicitly deferred
 
-Not implemented and not implied by current docs (still deferred after v0.6
+Not implemented and not implied by current docs (still deferred after v0.7
 unless a later milestone picks them up):
 
 - LLMs / automatic classification agents
@@ -52,14 +72,16 @@ unless a later milestone picks them up):
 - Embeddings / vector search
 - Graph visualization as the primary UI (or graph editing)
 - Full Perspectives / timeline engines
-- Evidence entities; complex multi-user semantic ACLs
+- Evidence entity model beyond the lifecycle foundation
+- Complex multi-user workspace ACLs / personal vs shared knowledge layers
 - Native notes / freeform annotation store
 - Sidecar writers or filesystem sync
 - Bulk legacy migration tooling beyond Alembic schema history
 - Automatic deletion of semantic data when Paperless removes documents
-  (intentional AtlasDocs delete/replace is separate and specified in v0.6)
+  (intentional AtlasDocs delete/replace is separate and specified in v0.6+)
 - Background workers beyond the single ingest worker; webhook ingestion
 - Private-deployment-specific scheduling, tunnels, or secret wiring
+- Full ontology editor; Supernova workloads
 
 ## Public product rule
 

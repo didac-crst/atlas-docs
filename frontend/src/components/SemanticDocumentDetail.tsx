@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, ExternalLink, Eye, FileInput, Link2, Trash2 } from "lucide-react";
+import { Download, ExternalLink, Eye, FileInput, Link2, RotateCcw, Trash2 } from "lucide-react";
 import {
   deleteDocument,
   documentDownloadUrl,
@@ -9,6 +9,7 @@ import {
   jobNeedsPolling,
   removeRelationship,
   replaceDocument,
+  restoreDocument,
   type DocumentDetail,
   type SessionInfo,
 } from "../api/client";
@@ -72,18 +73,29 @@ export function SemanticDocumentDetail({
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [restoreBusy, setRestoreBusy] = useState(false);
   const [replaceBusy, setReplaceBusy] = useState(false);
   const [replaceReason, setReplaceReason] = useState("");
   const [showReplace, setShowReplace] = useState(false);
+  const [selectedVersionId, setSelectedVersionId] = useState<number | "">("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement>(null);
   const confirmDeleteRef = useRef<HTMLButtonElement>(null);
+
+  const versions = document.versions ?? [];
+  const history = document.replacement_history ?? [];
+  const firstVersionId = versions[0]?.id;
+  const isEvidence = (document.lifecycle_category ?? "evidence") === "evidence";
 
   useEffect(() => {
     if (confirmDelete) {
       confirmDeleteRef.current?.focus();
     }
   }, [confirmDelete]);
+
+  useEffect(() => {
+    setSelectedVersionId(firstVersionId ?? "");
+  }, [document.paperless_document_id, firstVersionId]);
 
   async function onRemoveRelationship(relationshipId: string) {
     try {
@@ -98,7 +110,10 @@ export function SemanticDocumentDetail({
   async function onConfirmDeleteDocument() {
     setDeleteBusy(true);
     try {
-      await deleteDocument(document.paperless_document_id, csrfToken, { confirm: true });
+      await deleteDocument(document.paperless_document_id, csrfToken, {
+        confirm: true,
+        permanent: Boolean(document.trashed),
+      });
       setConfirmDelete(false);
       if (onDocumentDeleted) {
         await onDocumentDeleted();
@@ -107,6 +122,19 @@ export function SemanticDocumentDetail({
       onError(err instanceof Error ? err.message : "Failed to delete document");
     } finally {
       setDeleteBusy(false);
+    }
+  }
+
+  async function onRestoreDocument() {
+    setRestoreBusy(true);
+    try {
+      await restoreDocument(document.paperless_document_id, csrfToken);
+      const next = await fetchDocument(document.paperless_document_id);
+      await onRemoved(next, "Document restored from trash");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to restore document");
+    } finally {
+      setRestoreBusy(false);
     }
   }
 
@@ -156,10 +184,24 @@ export function SemanticDocumentDetail({
   const context = documentContextLine(document);
   const previewHref = documentPreviewUrl(document.paperless_document_id);
   const downloadHref = documentDownloadUrl(document.paperless_document_id);
+  const versionDownloadHref =
+    selectedVersionId === ""
+      ? null
+      : documentDownloadUrl(document.paperless_document_id, { version: selectedVersionId });
 
   return (
     <div>
       <header className="doc-header">
+        <p className="muted">
+          <span className="entity-chip" data-kind="document">
+            {document.lifecycle_category === "organizational"
+              ? "Organizational"
+              : document.lifecycle_category === "master_data"
+                ? "Master Data"
+                : "Evidence"}
+          </span>
+          {document.trashed ? " · In trash" : null}
+        </p>
         <h1 id="detail-title" className="doc-title">
           {documentDisplayTitle(document)}
         </h1>
@@ -168,6 +210,18 @@ export function SemanticDocumentDetail({
           <a className="btn btn-secondary" href={downloadHref} download>
             <Download size={16} aria-hidden /> Download
           </a>
+          <a
+            className="btn btn-ghost"
+            href={documentDownloadUrl(document.paperless_document_id, { original: true })}
+            download
+          >
+            <Download size={16} aria-hidden /> Download original
+          </a>
+          {versionDownloadHref ? (
+            <a className="btn btn-ghost" href={versionDownloadHref} download>
+              <Download size={16} aria-hidden /> Download selected version
+            </a>
+          ) : null}
           {onAddRelationship ? (
             <button type="button" className="btn btn-secondary" onClick={onAddRelationship}>
               <Link2 size={16} aria-hidden /> Add relationship
@@ -177,22 +231,37 @@ export function SemanticDocumentDetail({
               <Link2 size={16} aria-hidden /> Add relationship
             </a>
           )}
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setShowReplace((value) => !value)}
-            aria-expanded={showReplace}
-          >
-            <FileInput size={16} aria-hidden /> Replace document
-          </button>
-          <button
-            ref={deleteTriggerRef}
-            type="button"
-            className="btn btn-danger"
-            onClick={() => setConfirmDelete(true)}
-          >
-            <Trash2 size={16} aria-hidden /> Delete document
-          </button>
+          {isEvidence && !document.trashed ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowReplace((value) => !value)}
+              aria-expanded={showReplace}
+            >
+              <FileInput size={16} aria-hidden /> Replace document
+            </button>
+          ) : null}
+          {isEvidence && document.trashed ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={restoreBusy}
+              onClick={() => void onRestoreDocument()}
+            >
+              <RotateCcw size={16} aria-hidden /> Restore
+            </button>
+          ) : null}
+          {isEvidence ? (
+            <button
+              ref={deleteTriggerRef}
+              type="button"
+              className="btn btn-danger"
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 size={16} aria-hidden />{" "}
+              {document.trashed ? "Delete permanently" : "Move to trash"}
+            </button>
+          ) : null}
           <a
             className="btn btn-ghost"
             href={previewHref}
@@ -258,8 +327,9 @@ export function SemanticDocumentDetail({
         {confirmDelete ? (
           <div className="banner banner-error" role="alertdialog" aria-labelledby="delete-confirm-title">
             <p id="delete-confirm-title">
-              Delete this document? The original file will be deleted from Paperless and removed from
-              normal AtlasDocs views. This cannot be undone from AtlasDocs.
+              {document.trashed
+                ? "Permanently delete this document from Paperless? This cannot be undone from AtlasDocs."
+                : "Move this document to Paperless trash? It will leave normal AtlasDocs views until restored or permanently deleted."}
             </p>
             <div className="doc-actions">
               <button
@@ -269,7 +339,7 @@ export function SemanticDocumentDetail({
                 disabled={deleteBusy}
                 onClick={() => void onConfirmDeleteDocument()}
               >
-                Confirm delete
+                {document.trashed ? "Confirm permanent delete" : "Confirm move to trash"}
               </button>
               <button
                 type="button"
@@ -283,25 +353,96 @@ export function SemanticDocumentDetail({
           </div>
         ) : null}
 
-        <details className="tech-details">
-          <summary>Technical details</summary>
-          <dl>
-            <div>
-              <dt>Paperless document id</dt>
-              <dd>
-                <code>{document.paperless_document_id}</code>
-              </dd>
-            </div>
-            {document.entity_id ? (
+        <div className="doc-disclosure-stack">
+          <details className="tech-details">
+            <summary>Metadata</summary>
+            <dl>
               <div>
-                <dt>Entity UUID</dt>
+                <dt>Created</dt>
+                <dd>{document.created_date || "—"}</dd>
+              </div>
+              <div>
+                <dt>Correspondent</dt>
+                <dd>{document.correspondent || "—"}</dd>
+              </div>
+              <div>
+                <dt>Document type</dt>
+                <dd>{document.document_type || "—"}</dd>
+              </div>
+              <div>
+                <dt>Lifecycle</dt>
+                <dd>{document.lifecycle_category || "evidence"}</dd>
+              </div>
+            </dl>
+          </details>
+          <details className="tech-details">
+            <summary>OCR</summary>
+            <p className="muted">
+              OCR text remains authoritative in Paperless. Use preview above or open the source
+              document when configured.
+            </p>
+          </details>
+          <details className="tech-details">
+            <summary>History</summary>
+            {history.length === 0 ? (
+              <p className="muted">No replacement history yet.</p>
+            ) : (
+              <ul className="rel-list">
+                {history.map((row) => (
+                  <li key={`${row.previous_external_id}-${row.new_external_id}-${row.created_at}`}>
+                    Paperless {row.previous_external_id} → {row.new_external_id}
+                    <div className="meta muted">
+                      {[row.created_at, row.actor_label, row.reason].filter(Boolean).join(" · ")}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </details>
+          <details className="tech-details" open={versions.length > 0}>
+            <summary>Versions</summary>
+            {versions.length === 0 ? (
+              <p className="muted">No Paperless version metadata available.</p>
+            ) : (
+              <label className="field">
+                <span>Paperless version</span>
+                <select
+                  value={selectedVersionId === "" ? "" : String(selectedVersionId)}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setSelectedVersionId(value ? Number(value) : "");
+                  }}
+                >
+                  {versions.map((version) => (
+                    <option key={version.id} value={version.id}>
+                      Version {version.id}
+                      {version.created ? ` · ${version.created}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </details>
+          <details className="tech-details">
+            <summary>Technical details</summary>
+            <dl>
+              <div>
+                <dt>Paperless document id</dt>
                 <dd>
-                  <code>{document.entity_id}</code>
+                  <code>{document.paperless_document_id}</code>
                 </dd>
               </div>
-            ) : null}
-          </dl>
-        </details>
+              {document.entity_id ? (
+                <div>
+                  <dt>Entity UUID</dt>
+                  <dd>
+                    <code>{document.entity_id}</code>
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+          </details>
+        </div>
       </header>
 
       <div className="doc-detail-layout">

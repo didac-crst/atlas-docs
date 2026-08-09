@@ -60,6 +60,12 @@ class PaperlessDocumentPage:
 
 
 @dataclass(frozen=True)
+class PaperlessDocumentVersion:
+    id: int
+    created: str | None = None
+
+
+@dataclass(frozen=True)
 class PaperlessTaskStatus:
     task_id: str
     status: str  # PENDING | STARTED | SUCCESS | FAILURE | ...
@@ -515,7 +521,7 @@ class PaperlessClient:
         raise PaperlessUnavailableError("Paperless post_document response missing task id")
 
     def delete_document(self, document_id: int, token: str) -> None:
-        """Delete via DELETE /api/documents/{id}/ using the caller's authorization."""
+        """Move to trash via DELETE /api/documents/{id}/."""
         url = f"{self._base_url}/api/documents/{document_id}/"
         response = self._request("DELETE", url, token)
         if response.status_code in {200, 204}:
@@ -524,6 +530,85 @@ class PaperlessClient:
             # Already gone — treat as success for failure-safe cleanup after switch.
             return
         self._raise_for_status(response, document_id=document_id)
+
+    def restore_document(self, document_id: int, token: str) -> None:
+        """Restore from trash via POST /api/trash/ action=restore."""
+        url = f"{self._base_url}/api/trash/"
+        response = self._request(
+            "POST",
+            url,
+            token,
+            json={"action": "restore", "documents": [document_id]},
+        )
+        if response.status_code in {200, 204}:
+            return
+        self._raise_for_status(response, document_id=document_id)
+
+    def permanently_delete_document(self, document_id: int, token: str) -> None:
+        """Permanently purge via POST /api/trash/ action=empty."""
+        was_trashed = any(
+            doc.id == document_id
+            for doc in self.iter_trashed_documents(token, page_size=100)
+        )
+        if not was_trashed:
+            try:
+                self.get_document(document_id, token)
+            except PaperlessNotFoundError:
+                # Already purged — treat as idempotent success.
+                return
+            raise PaperlessUnavailableError(
+                f"Document {document_id} is not in Paperless trash"
+            )
+
+        url = f"{self._base_url}/api/trash/"
+        response = self._request(
+            "POST",
+            url,
+            token,
+            json={"action": "empty", "documents": [document_id]},
+        )
+        if response.status_code not in {200, 204}:
+            if response.status_code == 404:
+                return
+            self._raise_for_status(response, document_id=document_id)
+
+        still_trashed = any(
+            doc.id == document_id
+            for doc in self.iter_trashed_documents(token, page_size=100)
+        )
+        if still_trashed:
+            raise PaperlessUnavailableError(
+                f"Paperless trash empty did not purge document {document_id}"
+            )
+
+    def list_document_versions(
+        self, document_id: int, token: str
+    ) -> list[PaperlessDocumentVersion]:
+        """GET /api/documents/{id}/?fields=id,versions"""
+        url = f"{self._base_url}/api/documents/{document_id}/?{urlencode({'fields': 'id,versions'})}"
+        response = self._request("GET", url, token)
+        self._raise_for_status(response, document_id=document_id)
+        payload = self._parse_json(response)
+        if not isinstance(payload, dict):
+            return []
+        raw = payload.get("versions")
+        if not isinstance(raw, list):
+            return []
+        versions: list[PaperlessDocumentVersion] = []
+        for item in raw:
+            if isinstance(item, dict) and item.get("id") is not None:
+                try:
+                    versions.append(
+                        PaperlessDocumentVersion(
+                            id=int(item["id"]),
+                            created=_safe_short_string(item.get("created")),
+                        )
+                    )
+                except (TypeError, ValueError):
+                    continue
+            elif isinstance(item, int):
+                versions.append(PaperlessDocumentVersion(id=item))
+        return versions
 
     def get_task(self, task_id: str, token: str) -> PaperlessTaskStatus:
         url = f"{self._base_url}/api/tasks/?{urlencode({'task_id': task_id})}"
@@ -562,10 +647,18 @@ class PaperlessClient:
         document_id: int,
         *,
         kind: Literal["preview", "download"],
+        original: bool = False,
+        version: int | None = None,
     ) -> tuple[Iterator[bytes], str, str | None]:
         """Stream preview or download bytes from Paperless without logging the body."""
         suffix = "preview" if kind == "preview" else "download"
-        url = f"{self._base_url}/api/documents/{document_id}/{suffix}/"
+        params: dict[str, str] = {}
+        if original:
+            params["original"] = "true"
+        if version is not None:
+            params["version"] = str(int(version))
+        query = f"?{urlencode(params)}" if params else ""
+        url = f"{self._base_url}/api/documents/{document_id}/{suffix}/{query}"
         client = httpx.Client(timeout=self._timeout, transport=self._transport)
         try:
             response = client.send(
@@ -625,5 +718,40 @@ class PaperlessClient:
                 if limit is not None and yielded >= limit:
                     return
             if not batch.has_next:
+                break
+            page += 1
+
+    def iter_trashed_documents(
+        self, token: str, *, page_size: int = 100, limit: int | None = None
+    ):
+        """Yield trashed Paperless documents via GET /api/trash/."""
+        page = 1
+        yielded = 0
+        while True:
+            url = f"{self._base_url}/api/trash/?{urlencode({'page': page, 'page_size': page_size})}"
+            response = self._request("GET", url, token)
+            self._raise_for_status(response)
+            payload = self._parse_json(response)
+            if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+                break
+            rows = payload["results"]
+            if not rows:
+                break
+            for row in rows:
+                if not isinstance(row, dict) or row.get("id") is None:
+                    continue
+                try:
+                    doc_id = int(row["id"])
+                except (TypeError, ValueError):
+                    continue
+                yield PaperlessDocument(
+                    id=doc_id,
+                    title=_safe_short_string(row.get("title")),
+                    created_date=_safe_short_string(row.get("created_date") or row.get("created")),
+                )
+                yielded += 1
+                if limit is not None and yielded >= limit:
+                    return
+            if not payload.get("next"):
                 break
             page += 1

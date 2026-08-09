@@ -45,6 +45,10 @@ export type EntityDetail = {
   relationships: Relationship[];
   display_type: string | null;
   semantic_completeness: string;
+  lifecycle_category?: string;
+  archived?: boolean;
+  trashed?: boolean;
+  merged_into_entity_id?: string | null;
   backlinks: Backlink[];
   related_documents: RelatedDocument[];
   backlinks_truncated?: boolean;
@@ -59,6 +63,24 @@ export type DocumentDetail = {
   document_type: string | null;
   open_url: string | null;
   relationships: Relationship[];
+  semantic_completeness?: string;
+  lifecycle_category?: string;
+  trashed?: boolean;
+  versions?: DocumentVersion[];
+  replacement_history?: DocumentReplacementHistory[];
+};
+
+export type DocumentVersion = {
+  id: number;
+  created: string | null;
+};
+
+export type DocumentReplacementHistory = {
+  previous_external_id: string;
+  new_external_id: string;
+  actor_label: string | null;
+  reason: string | null;
+  created_at: string | null;
 };
 
 export type QueueItem = {
@@ -161,6 +183,7 @@ export type EntitySearchType =
 export type ExploreMode =
   | "all"
   | "documents"
+  | "knowledge"
   | "people"
   | "organizations"
   | "countries"
@@ -183,6 +206,9 @@ export type ExploreResultItem = {
   created_date: string | null;
   correspondent: string | null;
   document_type: string | null;
+  lifecycle_category?: string | null;
+  thumbnail_available?: boolean;
+  relationship_count?: number;
 };
 
 export type ExplorePage = {
@@ -522,11 +548,69 @@ export function removeRelationship(relationshipId: string, csrfToken: string) {
 export function deleteDocument(
   paperlessId: number,
   csrfToken: string,
+  options: { confirm?: boolean; permanent?: boolean } = {},
+) {
+  const confirm = options.confirm ?? true;
+  const permanent = options.permanent ?? false;
+  return apiFetch<void>(
+    `/ui/api/documents/${paperlessId}`,
+    { method: "DELETE", body: JSON.stringify({ confirm, permanent }) },
+    csrfToken,
+  );
+}
+
+export function restoreDocument(paperlessId: number, csrfToken: string) {
+  return apiFetch<void>(
+    `/ui/api/documents/${paperlessId}/restore`,
+    { method: "POST", body: JSON.stringify({}) },
+    csrfToken,
+  );
+}
+
+export function renameEntity(entityId: string, displayName: string, csrfToken: string) {
+  return apiFetch<EntityDetail>(
+    `/ui/api/entities/${entityId}/rename`,
+    { method: "POST", body: JSON.stringify({ display_name: displayName }) },
+    csrfToken,
+  );
+}
+
+export function archiveEntity(entityId: string, csrfToken: string) {
+  return apiFetch<EntityDetail>(
+    `/ui/api/entities/${entityId}/archive`,
+    { method: "POST", body: JSON.stringify({}) },
+    csrfToken,
+  );
+}
+
+export function restoreEntity(entityId: string, csrfToken: string) {
+  return apiFetch<EntityDetail>(
+    `/ui/api/entities/${entityId}/restore`,
+    { method: "POST", body: JSON.stringify({}) },
+    csrfToken,
+  );
+}
+
+export function mergeEntityPlaceholder(
+  entityId: string,
+  targetEntityId: string,
+  csrfToken: string,
+) {
+  return apiFetch<EntityDetail>(
+    `/ui/api/entities/${entityId}/merge`,
+    { method: "POST", body: JSON.stringify({ target_entity_id: targetEntityId }) },
+    csrfToken,
+  );
+}
+
+export function deleteEntity(
+  entityId: string,
+  csrfToken: string,
   options: { confirm?: boolean } = {},
 ) {
   const confirm = options.confirm ?? true;
   return apiFetch<void>(
-    `/ui/api/documents/${paperlessId}`,
+    `/ui/api/entities/${entityId}`,
     { method: "DELETE", body: JSON.stringify({ confirm }) },
     csrfToken,
   );
@@ -628,8 +712,15 @@ export function documentPreviewUrl(paperlessDocumentId: number): string {
   return `/ui/api/documents/${paperlessDocumentId}/preview`;
 }
 
-export function documentDownloadUrl(paperlessDocumentId: number): string {
-  return `/ui/api/documents/${paperlessDocumentId}/download`;
+export function documentDownloadUrl(
+  paperlessDocumentId: number,
+  options: { original?: boolean; version?: number } = {},
+): string {
+  const params = new URLSearchParams();
+  if (options.original) params.set("original", "true");
+  if (options.version != null) params.set("version", String(options.version));
+  const query = params.toString();
+  return `/ui/api/documents/${paperlessDocumentId}/download${query ? `?${query}` : ""}`;
 }
 
 export async function retryIngestJob(jobId: string, csrfToken: string): Promise<IngestJob> {

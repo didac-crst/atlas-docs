@@ -75,9 +75,13 @@ class FakePaperlessTransport(httpx.BaseTransport):
         self.preview_content_type: str | None = None
         self.content_hashes: dict[str, int] = {}  # sha256 hex -> paperless id
         self.deleted_document_ids: list[int] = []
+        self.trashed_documents: dict[int, dict] = {}
+        self.restored_document_ids: list[int] = []
+        self.purged_document_ids: list[int] = []
         self.delete_denied: set[int] = set()
         self.delete_unauthorized: set[int] = set()
         self.delete_server_error: set[int] = set()
+        self.last_download_query: str | None = None
 
     def _authorized(self, request: httpx.Request) -> bool:
         auth = request.headers.get("Authorization", "")
@@ -114,6 +118,47 @@ class FakePaperlessTransport(httpx.BaseTransport):
             if expected is None or expected != password:
                 return httpx.Response(401, json={"detail": "Unable to log in"})
             return httpx.Response(200, json={"token": self.next_token})
+
+        if path.endswith("/api/trash") and request.method == "POST":
+            if not self._authorized(request):
+                return httpx.Response(401, json={"detail": "unauthorized"})
+            try:
+                payload = json.loads(request.content.decode("utf-8") or "{}")
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return httpx.Response(400, json={"detail": "bad request"})
+            action = str(payload.get("action") or "")
+            docs = payload.get("documents") if isinstance(payload.get("documents"), list) else []
+            ids = [int(item) for item in docs if str(item).isdigit() or isinstance(item, int)]
+            if action == "restore":
+                for doc_id in ids:
+                    if doc_id in self.trashed_documents:
+                        self.documents[doc_id] = self.trashed_documents.pop(doc_id)
+                        self.restored_document_ids.append(doc_id)
+                return httpx.Response(200, json={"ok": True})
+            if action == "empty":
+                for doc_id in ids:
+                    if doc_id not in self.trashed_documents:
+                        continue
+                    if doc_id in self.delete_denied:
+                        return httpx.Response(403, json={"detail": "forbidden"})
+                    self.trashed_documents.pop(doc_id, None)
+                    self.documents.pop(doc_id, None)
+                    self.purged_document_ids.append(doc_id)
+                return httpx.Response(200, json={"ok": True})
+            return httpx.Response(400, json={"detail": "unknown action"})
+
+        if path.endswith("/api/trash") and request.method == "GET":
+            if not self._authorized(request):
+                return httpx.Response(401, json={"detail": "unauthorized"})
+            results = [
+                doc
+                for doc_id, doc in self.trashed_documents.items()
+                if doc_id not in self.denied
+            ]
+            return httpx.Response(
+                200,
+                json={"count": len(results), "next": None, "previous": None, "results": results},
+            )
 
         if path.endswith("/api/documents/post_document") and request.method == "POST":
             if not self._authorized(request):
@@ -346,7 +391,7 @@ class FakePaperlessTransport(httpx.BaseTransport):
                 return httpx.Response(503, json={"detail": "unavailable"})
             if document_id not in self.documents:
                 return httpx.Response(404, json={"detail": "not found"})
-            del self.documents[document_id]
+            self.trashed_documents[document_id] = self.documents.pop(document_id)
             self.deleted_document_ids.append(document_id)
             return httpx.Response(204)
 
@@ -361,4 +406,9 @@ class FakePaperlessTransport(httpx.BaseTransport):
             return httpx.Response(403, json={"detail": "forbidden"})
         if document_id not in self.documents:
             return httpx.Response(404, json={"detail": "not found"})
-        return httpx.Response(200, json=self.documents[document_id])
+        doc = dict(self.documents[document_id])
+        query = parse_qs(urlparse(str(request.url)).query)
+        fields = (query.get("fields") or [""])[0]
+        if "versions" in fields and "versions" not in doc:
+            doc["versions"] = doc.get("versions") or [{"id": 1, "created": "2024-01-01"}]
+        return httpx.Response(200, json=doc)

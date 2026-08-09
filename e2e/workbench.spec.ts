@@ -9,7 +9,9 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   const username = "ada";
 
   await page.goto("./connect");
-  await expect(page.getByRole("heading", { name: /Connect to Paperless/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^AtlasDocs$/i })).toBeVisible();
+  await expect(page.getByText(/Where evidence becomes knowledge/i).first()).toBeVisible();
+  await expect(page.getByText(/Secure authentication powered by Paperless/i)).toBeVisible();
   await page.getByLabel(/^Username$/i).fill(username);
   await page.getByLabel(/^Password$/i).fill(password);
   await page.getByRole("button", { name: /^Sign in$/i }).click();
@@ -17,7 +19,12 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   await expect(page.getByRole("heading", { name: /^AtlasDocs$/i })).toBeVisible({
     timeout: 15000,
   });
-  await expect(page.getByText(/Work areas|Needs classification/i).first()).toBeVisible();
+  await expect(page.getByText(/Where evidence becomes knowledge/i).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Work areas$/i })).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(page.getByText(/Needs classification/i).first()).toBeVisible();
+  await expect(page.getByText(/Powered by Paperless-ngx/i)).toBeVisible();
   const primaryNav = page.getByRole("navigation", { name: /Primary/i });
   await expect(primaryNav.getByRole("link", { name: /^Home$/i })).toBeVisible();
   await expect(primaryNav.getByRole("link", { name: /^Explore$/i })).toBeVisible();
@@ -64,6 +71,11 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
     "aria-pressed",
     "true",
   );
+  await page.getByRole("tab", { name: /^Knowledge$/i }).click();
+  await expect(page.getByRole("tab", { name: /^Knowledge$/i })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   await page.getByRole("tab", { name: /^People$/i }).click();
   await expect(page.getByRole("tab", { name: /^People$/i })).toHaveAttribute(
     "aria-selected",
@@ -79,33 +91,43 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
     await alice.first().click();
     await expect(page.getByRole("heading", { name: /^Alice$/i })).toBeVisible();
     await expect(page.getByText(/Related documents|Backlinks|Outgoing relationships/i).first()).toBeVisible();
+    await expect(page.getByText(/Master Data/i).first()).toBeVisible();
   }
+  await expect(page.getByText(password)).toHaveCount(0);
+
+  await page.getByRole("link", { name: /^About$/i }).first().click();
+  await expect(page.getByRole("heading", { name: /^AtlasDocs$/i })).toBeVisible();
+  await expect(page.getByText(/Where evidence becomes knowledge/i).first()).toBeVisible();
+  await expect(page.getByText(/transforms document archives into connected knowledge/i)).toBeVisible();
   await expect(page.getByText(password)).toHaveCount(0);
 
   await page.getByRole("link", { name: /^Classify$/i }).first().click();
   await expect(page.getByRole("heading", { name: /Needs classification|Classify|Documents/i })).toBeVisible();
+  // Shared e2e server may retain prior classification; use Any so the queue is populated.
+  await page.getByLabel(/^Classification$/i).selectOption("any");
+  await page.getByRole("button", { name: /Apply filters/i }).click();
+  await expect(page.getByText(/No unclassified documents|No documents|shown/i).first()).toBeVisible();
 
-  // Select two docs when checkboxes are present
   const checkboxes = page.locator('input[type="checkbox"]');
-  const count = await checkboxes.count();
-  if (count >= 2) {
-    await checkboxes.nth(0).check();
-    await checkboxes.nth(1).check();
-    await page.getByLabel(/Relationship type/i).first().selectOption("source-country");
-    const concept = page.getByLabel(/^Concept$/i).first();
-    if (await concept.count()) {
-      await concept.fill("Ger");
-      const option = page.getByRole("option", { name: /Germany/i });
-      if (await option.count()) {
-        await option.first().click();
-        await page.getByRole("button", { name: /Assign|Apply|Save/i }).first().click();
-      }
-    }
-  }
+  await expect(checkboxes.nth(1)).toBeVisible({ timeout: 15000 });
+  await checkboxes.nth(0).check();
+  await checkboxes.nth(1).check();
+  // Bulk assign offers Concept/Document targets; document-type is valid for Concept.
+  await page.getByLabel(/Target entity type/i).first().selectOption("concept");
+  await page.getByLabel(/Relationship type/i).first().selectOption("document-type");
+  const target = page.getByLabel(/^Target$/i).first();
+  await expect(target).toBeVisible();
+  await target.fill("Inv");
+  const option = page.getByRole("option", { name: /Invoice/i });
+  await expect(option.first()).toBeVisible({ timeout: 10000 });
+  await option.first().click();
+  await page.getByRole("button", { name: /Assign to selected/i }).first().click();
 
   await page.goto("./documents/184");
   const detail = page.locator(".detail-panel");
   await expect(detail.getByRole("heading", { name: /Payslip Germany/i })).toBeVisible();
+  await expect(detail.getByRole("button", { name: /^Move to trash$/i })).toBeVisible();
+  await expect(detail.getByRole("link", { name: /Download original/i })).toBeVisible();
 
   const previewFrame = detail.locator("iframe.doc-preview-frame");
   await expect(previewFrame).toHaveAttribute("src", /\/ui\/api\/documents\/184\/preview$/);
@@ -120,6 +142,14 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   );
   await expect(paperless).toHaveAttribute("target", "_blank");
 
+  await detail.getByRole("button", { name: /^Move to trash$/i }).click();
+  await expect(detail.getByRole("alertdialog")).toBeVisible();
+  await expect(detail.getByText(/Move this document to Paperless trash/i)).toBeVisible();
+  await detail.getByRole("button", { name: /^Cancel$/i }).click();
+  await expect(detail.getByRole("alertdialog")).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: /^Move to trash$/i })).toBeVisible();
+  await expect(page.getByText(password)).toHaveCount(0);
+
   await page.getByRole("button", { name: /^ada$/i }).click();
   await page.getByRole("menuitem", { name: /Reconcile/i }).click();
   await expect(page.getByRole("heading", { name: /reconciliation/i })).toBeVisible();
@@ -132,7 +162,7 @@ test("advanced token connect still works without leaking token", async ({ page }
   const secret = "e2e-paperless-token-should-never-leak";
   await page.goto("./connect");
   await page.getByText(/Advanced: paste API token/i).click();
-  await page.getByLabel(/Paperless token/i).fill(secret);
+  await page.getByLabel(/API token/i).fill(secret);
   await page.getByRole("button", { name: /Connect with token/i }).click();
   await expect(page.getByRole("heading", { name: /^AtlasDocs$/i })).toBeVisible();
   await expect(page.getByText(secret)).toHaveCount(0);

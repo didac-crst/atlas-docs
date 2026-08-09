@@ -17,6 +17,8 @@ const docItem = {
   created_date: "2024-01-15",
   correspondent: "Acme Payroll",
   document_type: "Payslip",
+  thumbnail_available: true,
+  relationship_count: 2,
 };
 
 describe("ExploreResultCard", () => {
@@ -34,11 +36,13 @@ describe("ExploreResultCard", () => {
       "href",
       "/ui/api/documents/184/preview",
     );
-    expect(screen.getByRole("link", { name: /^Download$/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /^Download$/ })).toHaveAttribute(
       "href",
       "/ui/api/documents/184/download",
     );
     expect(screen.getByText(/document-type: Payslip/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 relationships/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Document$/i)).toBeInTheDocument();
     expect(screen.queryByText("184")).toBeNull();
   });
 
@@ -54,7 +58,9 @@ describe("ExploreResultCard", () => {
             paperless_document_id: null,
             preview_available: false,
             download_available: false,
+            thumbnail_available: false,
             relationship_summary: [],
+            relationship_count: 1,
             subtitle: "person",
           }}
           view="grid"
@@ -65,6 +71,8 @@ describe("ExploreResultCard", () => {
       "href",
       "/entities/person-1",
     );
+    expect(screen.getByText(/^Person$/i, { selector: ".entity-chip" })).toBeInTheDocument();
+    expect(screen.getByText(/1 relationship$/i)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /^Preview$/i })).toBeNull();
   });
 });

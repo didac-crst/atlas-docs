@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { connect, login, type SessionInfo } from "../api/client";
+import { ProductIdentity } from "../components/ProductIdentity";
 
 type Props = {
   session: SessionInfo | null;
@@ -48,14 +49,14 @@ export function ConnectPage({ session, onConnected }: Props) {
   if (session?.authenticated) {
     return (
       <section className="panel connect-panel" aria-labelledby="connect-title">
-        <h1 id="connect-title">Connected</h1>
+        <ProductIdentity titleId="connect-title" size="md" />
         <p className="muted">
-          Your Paperless session is active. Use Disconnect in the header to sign out, or reconnect
+          You are signed in. Use Disconnect in the account menu to sign out, or sign in again
           below with another identity.
         </p>
         <details className="advanced-connect">
-          <summary>Reconnect</summary>
-          <p className="muted">Sign in again to replace the stored Paperless credentials.</p>
+          <summary>Sign in again</summary>
+          <p className="muted">Replace the stored credentials for this AtlasDocs session.</p>
           {error ? (
             <div className="banner banner-error" role="alert">
               {error}
@@ -97,11 +98,7 @@ export function ConnectPage({ session, onConnected }: Props) {
 
   return (
     <section className="panel connect-panel" aria-labelledby="connect-title">
-      <h1 id="connect-title">Connect to Paperless</h1>
-      <p className="muted">
-        Sign in with your Paperless username and password. Credentials stay on the server in an
-        HttpOnly session and are never sent back to the browser.
-      </p>
+      <ProductIdentity titleId="connect-title" size="lg" />
       {error ? (
         <div className="banner banner-error" role="alert">
           {error}
@@ -136,6 +133,7 @@ export function ConnectPage({ session, onConnected }: Props) {
           {saving ? "Signing in…" : "Sign in"}
         </button>
       </form>
+      <p className="connect-auth-note muted">Secure authentication powered by Paperless.</p>
 
       <details className="advanced-connect">
         <summary>Advanced: paste API token</summary>
@@ -144,7 +142,7 @@ export function ConnectPage({ session, onConnected }: Props) {
         </p>
         <form className="composer" onSubmit={onTokenConnect}>
           <div className="field">
-            <label htmlFor="paperless-token">Paperless token</label>
+            <label htmlFor="paperless-token">API token</label>
             <input
               id="paperless-token"
               name="paperless_token"

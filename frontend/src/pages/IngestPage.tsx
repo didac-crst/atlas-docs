@@ -144,8 +144,8 @@ export function IngestPage({ session, onSession }: Props) {
           <FilePlus2 size={20} aria-hidden /> Ingest document
         </h1>
         <p className="muted">
-          Upload a file to Paperless through AtlasDocs. Jobs continue on the server until ready or
-          failed.
+          Upload a file through AtlasDocs. Jobs continue on the server until ready or
+          failed; the source document engine stores the file.
         </p>
         {error ? (
           <div className="banner banner-error" role="alert">

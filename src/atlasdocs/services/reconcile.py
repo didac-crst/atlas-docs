@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field
 
 from sqlalchemy.orm import Session
 
-from atlasdocs.db.models import EXTERNAL_SYSTEM_PAPERLESS
+from atlasdocs.db.models import EXTERNAL_SYSTEM_PAPERLESS, utcnow
 from atlasdocs.services.documents import DocumentService
 from atlasdocs.services.paperless import (
     PaperlessAuthError,
@@ -25,6 +25,8 @@ class ReconcileSummary:
     already_present: list[int] = field(default_factory=list)
     missing_in_paperless: list[int] = field(default_factory=list)
     inaccessible_in_paperless: list[int] = field(default_factory=list)
+    trashed_in_paperless: list[int] = field(default_factory=list)
+    purged_in_paperless: list[int] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -47,6 +49,8 @@ class ReconcileSummary:
             f"  Already present: {self.already_present_count}",
             f"  Missing in Paperless: {len(self.missing_in_paperless)}",
             f"  Inaccessible in Paperless: {len(self.inaccessible_in_paperless)}",
+            f"  Trashed in Paperless: {len(self.trashed_in_paperless)}",
+            f"  Purged in Paperless (not tombstoned locally): {len(self.purged_in_paperless)}",
         ]
         if self.errors:
             lines.append(f"  Errors: {len(self.errors)}")
@@ -75,6 +79,7 @@ class ReconcileService:
 
         summary = ReconcileSummary(dry_run=dry_run, limit=limit)
         seen_ids: set[int] = set()
+        trashed_ids: set[int] = set()
 
         try:
             for doc in self._paperless.iter_all_documents(
@@ -87,6 +92,9 @@ class ReconcileService:
                     if existing.entity is not None and existing.entity.deleted_at is not None:
                         # Intentional Atlas tombstone — do not recreate or report missing.
                         continue
+                    if existing.entity is not None and existing.entity.trashed_at is not None:
+                        if not dry_run:
+                            existing.entity.trashed_at = None
                     summary.already_present.append(doc.id)
                     continue
                 if dry_run:
@@ -100,6 +108,23 @@ class ReconcileService:
             summary.errors.append(str(exc))
             return summary
 
+        # Collection-level trash scan (Paperless soft-deleted documents).
+        try:
+            for doc in self._paperless.iter_trashed_documents(
+                token, page_size=page_size, limit=limit
+            ):
+                trashed_ids.add(doc.id)
+                summary.trashed_in_paperless.append(doc.id)
+                existing = self._documents.get_external_reference(doc.id)
+                if existing is not None and existing.entity is not None:
+                    if existing.entity.deleted_at is not None:
+                        continue
+                    if not dry_run and existing.entity.trashed_at is None:
+                        existing.entity.trashed_at = utcnow()
+            if not dry_run:
+                self._session.flush()
+        except (PaperlessAuthError, PaperlessNotFoundError, PaperlessUnavailableError) as exc:
+            summary.errors.append(f"trash scan: {exc}")
         refs = self._documents.list_paperless_external_references()
         for ref in refs:
             if ref.entity is not None and ref.entity.deleted_at is not None:
@@ -111,15 +136,15 @@ class ReconcileService:
                     f"Non-integer Paperless external_id on entity {ref.entity_id}"
                 )
                 continue
-            if paperless_id in seen_ids:
-                # Already confirmed via the listing scan; avoid a second GET.
+            if paperless_id in seen_ids or paperless_id in trashed_ids:
                 continue
             if limit is not None:
-                # Limited runs only create/scan; orphan verification needs a full pass.
                 continue
             try:
                 self._paperless.assert_accessible(paperless_id, token=token)
             except PaperlessNotFoundError:
+                # Missing from active and trash collections → treat as purged.
+                summary.purged_in_paperless.append(paperless_id)
                 summary.missing_in_paperless.append(paperless_id)
             except PaperlessAuthError:
                 summary.inaccessible_in_paperless.append(paperless_id)
@@ -128,6 +153,8 @@ class ReconcileService:
 
         summary.missing_in_paperless.sort()
         summary.inaccessible_in_paperless.sort()
+        summary.trashed_in_paperless.sort()
+        summary.purged_in_paperless.sort()
         summary.created.sort()
         summary.already_present.sort()
         return summary

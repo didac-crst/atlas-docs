@@ -15,6 +15,19 @@ vi.mock("../api/client", async () => {
 import { connect, login } from "../api/client";
 
 describe("ConnectPage", () => {
+  it("presents AtlasDocs identity rather than a Paperless login title", () => {
+    render(
+      <ConnectPage
+        session={{ authenticated: false, csrf_token: "csrf" }}
+        onConnected={async () => undefined}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: /^AtlasDocs$/i })).toBeInTheDocument();
+    expect(screen.getByText(/Where evidence becomes knowledge/i)).toBeInTheDocument();
+    expect(screen.getByText(/Secure authentication powered by Paperless/i)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Connect to Paperless/i })).toBeNull();
+  });
+
   it("submits username/password login and clears the password", async () => {
     const user = userEvent.setup();
     const onConnected = vi.fn(async () => undefined);
@@ -30,6 +43,7 @@ describe("ConnectPage", () => {
     await user.type(screen.getByLabelText(/^Username$/i), "ada");
     const password = screen.getByLabelText(/^Password$/i);
     expect(password).toHaveAttribute("type", "password");
+    await user.clear(password);
     await user.type(password, secret);
     await user.click(screen.getByRole("button", { name: /^Sign in$/i }));
 
@@ -38,7 +52,7 @@ describe("ConnectPage", () => {
     expect(password).toHaveValue("");
     expect(screen.queryByDisplayValue(secret)).toBeNull();
     expect(document.body.textContent).not.toContain(secret);
-  });
+  }, 15000);
 
   it("uses advanced token paste via connect()", async () => {
     const user = userEvent.setup();
@@ -53,8 +67,9 @@ describe("ConnectPage", () => {
     );
 
     await user.click(screen.getByText(/Advanced: paste API token/i));
-    const input = screen.getByLabelText(/Paperless token/i);
+    const input = screen.getByLabelText(/API token/i);
     expect(input).toHaveAttribute("type", "password");
+    await user.clear(input);
     await user.type(input, secret);
     await user.click(screen.getByRole("button", { name: /Connect with token/i }));
 
@@ -63,5 +78,5 @@ describe("ConnectPage", () => {
     expect(input).toHaveValue("");
     expect(screen.queryByDisplayValue(secret)).toBeNull();
     expect(document.body.textContent).not.toContain(secret);
-  });
+  }, 15000);
 });

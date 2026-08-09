@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <strong>Paperless stores the documents. AtlasDocs stores the meaning.</strong>
+  <strong>Where evidence becomes knowledge.</strong>
 </p>
 
 <p align="center">
@@ -85,6 +85,8 @@ flowchart LR
 | | |
 | --- | --- |
 | [Architecture](docs/architecture.md) | Model, ownership, boundaries |
+| [Product experience](docs/product-experience-spec.md) | UX philosophy, lifecycle categories, navigation |
+| [Product identity](docs/product-identity.md) | AtlasDocs-first branding, slogan, About |
 | [Document lifecycle](docs/document-lifecycle.md) | Create, replace, delete, tombstone, completeness |
 | [Frontend](docs/frontend.md) | SPA, BFF, auth, brand |
 | [API](docs/api.md) | JSON + `/ui/api` surfaces |
@@ -92,7 +94,7 @@ flowchart LR
 | [Reconciliation](docs/reconciliation.md) | Safety + CLI/HTTP |
 | [Development](docs/development.md) | Setup, env, layout |
 | [Testing](docs/testing.md) | Pytest, Vitest, Playwright, CI |
-| [Roadmap](docs/roadmap.md) | Next + deferred |
+| [Roadmap](docs/roadmap.md) | Next + deferred · [v0.7 sprint](docs/v0.7-product-experience.md) |
 | [ADRs](docs/adr/) · [Archive](docs/archive/) | Decisions · history |
 
 ## Quick start

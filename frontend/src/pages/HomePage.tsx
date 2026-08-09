@@ -9,6 +9,7 @@ import {
   type SessionInfo,
 } from "../api/client";
 import markUrl from "../assets/atlas-docs-mark.svg";
+import { PRODUCT_SLOGAN } from "../brand";
 
 type Props = {
   session?: SessionInfo | null;
@@ -58,12 +59,12 @@ export function HomePage({ session: _session }: Props) {
       <div className="home-brand">
         <img src={markUrl} alt="" width={64} height={64} />
         <h1 id="home-title">AtlasDocs</h1>
-        <p className="muted">Semantic work surface for your documents.</p>
+        <p className="product-identity-slogan muted">{PRODUCT_SLOGAN}</p>
       </div>
 
       <form className="home-search" role="search" onSubmit={onSearch}>
         <label htmlFor="home-global-search" className="sr-only">
-          Search documents and concepts
+          Search anything
         </label>
         <div className="home-search-row">
           <Search size={18} aria-hidden />
@@ -73,7 +74,7 @@ export function HomePage({ session: _session }: Props) {
             name="q"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search documents and concepts"
+            placeholder="Search anything…"
             autoComplete="off"
           />
           <button type="submit" className="btn">
