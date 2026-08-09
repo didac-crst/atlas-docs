@@ -11,6 +11,10 @@ type Props = {
   view: "list" | "grid";
   /** Prefer opening the in-app preview modal instead of navigating away. */
   onPreview?: (paperlessDocumentId: number, title: string) => void;
+  /** Classify (and other queues): multi-select checkbox. */
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 };
 
 function completenessLabel(value: string): string {
@@ -49,8 +53,15 @@ function typeLabel(entityType: string): string {
   }
 }
 
-/** Shared document/entity result card for Explore, search, and relationship picks. */
-export function DocumentCard({ item, view, onPreview }: Props) {
+/** Shared document/entity result card for Explore, Classify, search, and relationship picks. */
+export function DocumentCard({
+  item,
+  view,
+  onPreview,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
+}: Props) {
   const isDocument = item.entity_type === "document" && item.paperless_document_id != null;
   const href = isDocument
     ? `/documents/${item.paperless_document_id}`
@@ -64,17 +75,37 @@ export function DocumentCard({ item, view, onPreview }: Props) {
   const relationshipCount = item.relationship_count ?? item.relationship_summary.length;
   const showThumb = isDocument && item.thumbnail_available !== false && item.preview_available;
 
+  function openDocument() {
+    if (isDocument && onPreview && item.paperless_document_id != null) {
+      onPreview(item.paperless_document_id, title);
+    }
+  }
+
   return (
-    <article className={`doc-card doc-card-${view}`} data-entity-type={item.entity_type}>
+    <article
+      className={`doc-card doc-card-${view}${selected ? " doc-card-selected" : ""}`}
+      data-entity-type={item.entity_type}
+    >
+      {selectable && isDocument ? (
+        <label className="doc-card-check">
+          <span className="sr-only">Select {title}</span>
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect?.()}
+          />
+        </label>
+      ) : null}
+
       {isDocument ? (
         <button
           type="button"
           className="doc-card-thumb"
           aria-label={item.preview_available ? `Preview ${title}` : title}
-          disabled={!item.preview_available}
+          disabled={!item.preview_available && !onPreview}
           onClick={() => {
-            if (item.preview_available && onPreview && item.paperless_document_id != null) {
-              onPreview(item.paperless_document_id, title);
+            if (onPreview && item.paperless_document_id != null) {
+              openDocument();
             }
           }}
         >
@@ -100,9 +131,13 @@ export function DocumentCard({ item, view, onPreview }: Props) {
 
       <div className="doc-card-main">
         <span className="entity-chip" data-kind={item.entity_type}>
-          {typeLabel(item.entity_type)}
+          {documentType || typeLabel(item.entity_type)}
         </span>
-        {href ? (
+        {isDocument && onPreview ? (
+          <button type="button" className="doc-card-title doc-card-title-btn" onClick={openDocument}>
+            {title}
+          </button>
+        ) : href ? (
           <Link to={href} className="doc-card-title">
             {title}
           </Link>
@@ -144,11 +179,11 @@ export function DocumentCard({ item, view, onPreview }: Props) {
 
       {isDocument ? (
         <div className="doc-card-actions">
-          {item.preview_available && onPreview ? (
+          {onPreview ? (
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => onPreview(item.paperless_document_id!, title)}
+              onClick={openDocument}
             >
               <Eye size={16} aria-hidden /> Preview
             </button>

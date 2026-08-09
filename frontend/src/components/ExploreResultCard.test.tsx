@@ -22,17 +22,14 @@ const docItem = {
 };
 
 describe("ExploreResultCard", () => {
-  it("links documents to detail and exposes preview/download", () => {
+  it("opens documents via title button when onPreview is provided", () => {
     const onPreview = vi.fn();
     render(
       <MemoryRouter>
         <ExploreResultCard item={docItem} view="list" onPreview={onPreview} />
       </MemoryRouter>,
     );
-    expect(screen.getByRole("link", { name: /Payslip Germany/i })).toHaveAttribute(
-      "href",
-      "/documents/184",
-    );
+    expect(screen.getByRole("button", { name: /^Payslip Germany$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Preview$/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^Download$/ })).toHaveAttribute(
       "href",
@@ -41,10 +38,20 @@ describe("ExploreResultCard", () => {
     expect(screen.getByText(/Payslip/i, { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText(/Acme Payroll/i)).toBeInTheDocument();
     expect(screen.getByText(/2 relationships/i)).toBeInTheDocument();
-    expect(screen.getByText(/^Document$/i)).toBeInTheDocument();
     expect(screen.queryByText("184")).toBeNull();
   });
 
+  it("links documents to detail when onPreview is omitted", () => {
+    render(
+      <MemoryRouter>
+        <ExploreResultCard item={docItem} view="list" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: /Payslip Germany/i })).toHaveAttribute(
+      "href",
+      "/documents/184",
+    );
+  });
   it("renders non-document entities with entity detail links", () => {
     render(
       <MemoryRouter>

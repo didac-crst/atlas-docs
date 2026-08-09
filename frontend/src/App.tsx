@@ -11,7 +11,7 @@ import { ExplorePage } from "./pages/ExplorePage";
 import { HomePage } from "./pages/HomePage";
 import { IngestPage } from "./pages/IngestPage";
 import { ReconcilePage } from "./pages/ReconcilePage";
-import { WorkbenchPage } from "./pages/WorkbenchPage";
+import { DocumentDeepLink, WorkbenchPage } from "./pages/WorkbenchPage";
 import markUrl from "./assets/atlas-docs-mark.svg";
 
 export function App() {
@@ -209,11 +209,7 @@ export function App() {
           <Route
             path="/documents/:paperlessId"
             element={
-              authenticated && session ? (
-                <WorkbenchPage session={session} onSession={setSession} />
-              ) : (
-                <Navigate to="/connect" replace />
-              )
+              authenticated && session ? <DocumentDeepLink /> : <Navigate to="/connect" replace />
             }
           />
           <Route

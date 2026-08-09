@@ -38,25 +38,27 @@ test("viewer open/close, escape, overflow trash, and no token leak", async ({ pa
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
   await page.goto("./documents/184");
-  const detail = page.locator(".detail-panel");
-  await expect(detail.getByRole("heading", { name: /Payslip Germany/i })).toBeVisible();
-  await expect(detail.locator("iframe.doc-preview-frame")).toHaveAttribute(
+  await expect(page).toHaveURL(/\/classify\?.*preview=184/);
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("iframe.document-viewer-frame")).toHaveAttribute(
     "src",
     /\/ui\/api\/documents\/184\/preview$/,
   );
-  await expect(detail.locator(".doc-title")).not.toHaveText(/184/);
-  const technical = detail.locator(".tech-details").filter({ hasText: /Technical details/i });
+  const technical = dialog.locator(".tech-details").filter({ hasText: /Technical details/i });
   await technical.getByText(/Technical details/i).click();
   await expect(technical).toContainText("184");
 
-  await detail.getByRole("button", { name: /More actions/i }).click();
-  await expect(detail.getByRole("menuitem", { name: /Open in Paperless/i })).toBeVisible();
+  await dialog.getByRole("button", { name: /More actions/i }).click();
+  await expect(dialog.getByRole("menuitem", { name: /Open in Paperless/i })).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(dialog.getByRole("menuitem", { name: /Open in Paperless/i })).toHaveCount(0);
+  await expect(dialog).toBeVisible();
 
-  await detail.getByRole("button", { name: /^Move to trash$/i }).click();
-  await expect(detail.getByRole("alertdialog")).toBeVisible();
-  await detail.getByRole("button", { name: /^Cancel$/i }).click();
-  await expect(detail.getByRole("alertdialog")).toHaveCount(0);
+  await dialog.getByRole("button", { name: /^Move to trash$/i }).click();
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  await page.getByRole("button", { name: /^Cancel$/i }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
   await expect(page.getByText(password)).toHaveCount(0);
 });
 

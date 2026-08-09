@@ -102,7 +102,7 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   await expect(page.getByText(password)).toHaveCount(0);
 
   await page.getByRole("link", { name: /^Classify$/i }).first().click();
-  await expect(page.getByRole("heading", { name: /Needs classification|Classify|Documents/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Classify$/i })).toBeVisible();
   // Shared e2e server may retain prior classification; use Any so the queue is populated.
   await page.getByLabel(/^Classification$/i).selectOption("any");
   await page.getByRole("button", { name: /Apply filters/i }).click();
@@ -110,8 +110,11 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
 
   const checkboxes = page.locator('input[type="checkbox"]');
   await expect(checkboxes.nth(1)).toBeVisible({ timeout: 15000 });
-  await checkboxes.nth(0).check();
-  await checkboxes.nth(1).check();
+  await checkboxes.nth(0).check(); // select page
+  // After select page, open batch actions
+  await expect(page.getByRole("region", { name: /Batch actions/i })).toBeVisible();
+  await page.getByRole("button", { name: /Add relationship/i }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
   // Bulk assign offers Concept/Document targets; document-type is valid for Concept.
   await page.getByLabel(/Target entity type/i).first().selectOption("concept");
   await page.getByLabel(/Relationship type/i).first().selectOption("document-type");
@@ -124,33 +127,35 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   await page.getByRole("button", { name: /Assign to selected/i }).first().click();
 
   await page.goto("./documents/184");
-  const detail = page.locator(".detail-panel");
-  await expect(detail.getByRole("heading", { name: /Payslip Germany/i })).toBeVisible();
-  await expect(detail.getByRole("button", { name: /^Move to trash$/i })).toBeVisible();
-
-  const previewFrame = detail.locator("iframe.doc-preview-frame");
-  await expect(previewFrame).toHaveAttribute("src", /\/ui\/api\/documents\/184\/preview$/);
-  const download = detail.getByRole("link", { name: /^Download$/i });
-  await expect(download).toHaveAttribute("href", /\/ui\/api\/documents\/184\/download$/);
-  await detail.getByRole("button", { name: /More actions/i }).click();
-  const openPreview = detail.getByRole("menuitem", { name: /Open preview in new tab/i });
-  await expect(openPreview).toHaveAttribute("href", /\/ui\/api\/documents\/184\/preview$/);
-  await expect(detail.getByRole("menuitem", { name: /Download original/i })).toBeVisible();
-  const paperless = detail.getByRole("menuitem", { name: /Open in Paperless/i });
+  await expect(page).toHaveURL(/\/classify\?.*preview=184/);
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: /Payslip Germany|Document preview/i }).first()).toBeVisible();
+  await expect(dialog.locator("iframe.document-viewer-frame")).toHaveAttribute(
+    "src",
+    /\/ui\/api\/documents\/184\/preview$/,
+  );
+  await expect(dialog.getByRole("button", { name: /^Move to trash$/i })).toBeVisible();
+  await dialog.getByRole("button", { name: /More actions/i }).click();
+  const paperless = dialog.getByRole("menuitem", { name: /Open in Paperless/i });
   await expect(paperless).toHaveAttribute(
     "href",
     "http://paperless.example.test/documents/184/",
   );
   await expect(paperless).toHaveAttribute("target", "_blank");
   await page.keyboard.press("Escape");
+  await expect(dialog.getByRole("menuitem", { name: /Open in Paperless/i })).toHaveCount(0);
 
-  await detail.getByRole("button", { name: /^Move to trash$/i }).click();
-  await expect(detail.getByRole("alertdialog")).toBeVisible();
-  await expect(detail.getByText(/Move this document to trash/i)).toBeVisible();
-  await detail.getByRole("button", { name: /^Cancel$/i }).click();
-  await expect(detail.getByRole("alertdialog")).toHaveCount(0);
-  await expect(detail.getByRole("button", { name: /^Move to trash$/i })).toBeVisible();
+  await dialog.getByRole("button", { name: /^Move to trash$/i }).click();
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  await expect(page.getByText(/Move this document to trash/i)).toBeVisible();
+  await page.getByRole("button", { name: /^Cancel$/i }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /^Move to trash$/i })).toBeVisible();
   await expect(page.getByText(password)).toHaveCount(0);
+
+  await dialog.getByRole("button", { name: /^Close$/i }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   await page.getByRole("button", { name: /^ada$/i }).click();
   await page.getByRole("menuitem", { name: /Reconcile/i }).click();

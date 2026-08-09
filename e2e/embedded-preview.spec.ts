@@ -20,10 +20,11 @@ test("embedded preview uses same-origin BFF PDF without leaking tokens", async (
   });
 
   await page.goto("./documents/184");
-  const detail = page.locator(".detail-panel");
-  await expect(detail.getByRole("heading", { name: /Payslip Germany/i })).toBeVisible();
+  await expect(page).toHaveURL(/\/classify\?.*preview=184/);
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
 
-  const previewFrame = detail.locator("iframe.doc-preview-frame");
+  const previewFrame = dialog.locator("iframe.document-viewer-frame");
   await expect(previewFrame).toHaveAttribute("src", /\/ui\/api\/documents\/184\/preview$/);
   await expect(previewFrame).not.toHaveAttribute("sandbox");
   const previewSrc = await previewFrame.getAttribute("src");
@@ -31,15 +32,13 @@ test("embedded preview uses same-origin BFF PDF without leaking tokens", async (
   expect(previewSrc!).toMatch(/^\/ui\/api\/documents\/184\/preview$/);
   expect(previewSrc!).not.toMatch(/paperless/i);
 
-  await expect(detail.getByRole("link", { name: /^Download$/i })).toHaveAttribute(
-    "href",
-    /\/ui\/api\/documents\/184\/download$/,
-  );
-  await detail.getByRole("button", { name: /More actions/i }).click();
+  await expect(dialog.getByRole("link", { name: /^Download$/i })).toBeVisible();
+  await dialog.getByRole("button", { name: /More actions/i }).click();
   await expect(
-    detail.getByRole("menuitem", { name: /Open in Paperless/i }),
+    dialog.getByRole("menuitem", { name: /Open in Paperless/i }),
   ).toHaveAttribute("href", /\/documents\/184\/$/);
   await page.keyboard.press("Escape");
+  await expect(dialog.getByRole("menuitem", { name: /Open in Paperless/i })).toHaveCount(0);
 
   const previewResponse = await page.request.get("/ui/api/documents/184/preview");
   expect(previewResponse.status()).toBe(200);
@@ -59,6 +58,9 @@ test("embedded preview uses same-origin BFF PDF without leaking tokens", async (
   const downloadResponse = await page.request.get("/ui/api/documents/184/download");
   expect(downloadResponse.status()).toBe(200);
   expect(downloadResponse.headers()["content-disposition"] ?? "").toMatch(/^attachment\b/);
+
+  await dialog.getByRole("button", { name: /^Close$/i }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   await page.getByRole("button", { name: /^ada$/i }).click();
   await page.getByRole("menuitem", { name: /Disconnect/i }).click();

@@ -1,23 +1,42 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { LayoutGrid, List } from "lucide-react";
 import {
   ApiError,
-  fetchDocument,
   fetchDocuments,
   fetchRelationshipTypes,
   getSession,
   type ClassificationFilter,
   type CompletenessFilter,
-  type DocumentDetail,
   type DocumentSort,
+  type ExploreResultItem,
+  type ExploreView,
+  type QueueItem,
   type QueuePage,
   type RelationshipType,
   type SessionInfo,
   type SortOrder,
 } from "../api/client";
-import { DocumentQueue, type QueueFilters } from "../components/DocumentQueue";
-import { RelationshipComposer } from "../components/RelationshipComposer";
-import { SemanticDocumentDetail } from "../components/SemanticDocumentDetail";
+import { BulkRelationshipForm } from "../components/BulkRelationshipForm";
+import { ClassifyBatchBar } from "../components/ClassifyBatchBar";
+import { Dialog } from "../components/Dialog";
+import { DocumentCard } from "../components/DocumentCard";
+import { DocumentClassifyPanel } from "../components/DocumentClassifyPanel";
+import { DocumentViewerModal } from "../components/DocumentViewerModal";
+import { PageLayout } from "../components/PageLayout";
+
+export type QueueFilters = {
+  q: string;
+  classification: ClassificationFilter;
+  sort: DocumentSort;
+  order: SortOrder;
+  created_gte: string;
+  created_lte: string;
+  correspondent: string;
+  document_type: string;
+  tag: string;
+  completeness: CompletenessFilter;
+};
 
 type Props = {
   session: SessionInfo;
@@ -30,7 +49,14 @@ function parseClassification(value: string | null): ClassificationFilter {
 }
 
 function parseCompleteness(value: string | null): CompletenessFilter {
-  if (value === "empty" || value === "partial" || value === "classified" || value === "needs_review" || value === "complete" || value === "any") {
+  if (
+    value === "empty" ||
+    value === "partial" ||
+    value === "classified" ||
+    value === "needs_review" ||
+    value === "complete" ||
+    value === "any"
+  ) {
     return value;
   }
   return "any";
@@ -47,12 +73,65 @@ function parseOrder(value: string | null): SortOrder {
   return value === "asc" ? "asc" : "desc";
 }
 
-export function WorkbenchPage({ session, onSession }: Props) {
+function parseView(value: string | null): ExploreView {
+  return value === "grid" ? "grid" : "list";
+}
+
+function sortPreset(sort: DocumentSort, order: SortOrder): string {
+  if (sort === "created" && order === "desc") return "newest";
+  if (sort === "created" && order === "asc") return "oldest";
+  if (sort === "title") return "title";
+  if (sort === "correspondent") return "correspondent";
+  return "newest";
+}
+
+function queueItemToCard(item: QueueItem): ExploreResultItem {
+  const label = item.title?.trim() || "Untitled document";
+  return {
+    id: null,
+    label,
+    entity_type: "document",
+    semantic_completeness: "empty",
+    subtitle: [item.document_type, item.correspondent, item.created_date].filter(Boolean).join(" · ") || null,
+    paperless_document_id: item.paperless_document_id,
+    open_url: null,
+    preview_available: true,
+    download_available: true,
+    relationship_summary: [],
+    created_date: item.created_date,
+    correspondent: item.correspondent,
+    document_type: item.document_type,
+    thumbnail_available: true,
+    relationship_count: 0,
+  };
+}
+
+/** Deep link `/documents/:id` → Classify collection + shared viewer modal. */
+export function DocumentDeepLink() {
   const params = useParams();
+  const [searchParams] = useSearchParams();
+  const id = Number(params.paperlessId);
+  if (!Number.isFinite(id) || id <= 0) {
+    return <Navigate to="/classify" replace />;
+  }
+  const next = new URLSearchParams(searchParams);
+  next.set("preview", String(id));
+  if (!next.get("classification")) next.set("classification", "any");
+  return <Navigate to={`/classify?${next.toString()}`} replace />;
+}
+
+/**
+ * Classify is a specialized document collection view — sibling of Explore —
+ * with multi-selection and batch actions. Documents open in the shared viewer modal.
+ */
+export function WorkbenchPage({ session, onSession }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+
   const page = Number(searchParams.get("page") || "1") || 1;
-  const selectedId = params.paperlessId ? Number(params.paperlessId) : null;
+  const view = parseView(searchParams.get("view"));
+  const previewId = Number(searchParams.get("preview") || "") || null;
+  const previewTitle = searchParams.get("preview_title") || "Document preview";
 
   const filters: QueueFilters = useMemo(
     () => ({
@@ -70,12 +149,30 @@ export function WorkbenchPage({ session, onSession }: Props) {
     [searchParams],
   );
 
+  const [draft, setDraft] = useState(filters);
   const [queue, setQueue] = useState<QueuePage | null>(null);
-  const [document, setDocument] = useState<DocumentDetail | null>(null);
   const [types, setTypes] = useState<RelationshipType[]>([]);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [batchOpen, setBatchOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setDraft(filters);
+  }, [filters]);
+
+  useEffect(() => {
+    if (!queue) return;
+    const visible = new Set(queue.items.map((item) => item.paperless_document_id));
+    setSelected((prev) => {
+      const next = new Set<number>();
+      for (const id of prev) {
+        if (visible.has(id)) next.add(id);
+      }
+      return next;
+    });
+  }, [queue]);
 
   async function refreshCsrf() {
     const next = await getSession();
@@ -99,39 +196,48 @@ export function WorkbenchPage({ session, onSession }: Props) {
     };
   }
 
-  function listSearchString(overrides: Partial<QueueFilters> & { page?: number } = {}) {
-    const next = buildListParams(overrides);
+  function writeParams(
+    next: Partial<QueueFilters> & { page?: number; view?: ExploreView; preview?: number | null; preview_title?: string | null },
+  ) {
+    const merged = buildListParams(next);
     const params = new URLSearchParams();
-    if (next.page > 1) params.set("page", String(next.page));
-    if (next.q.trim()) params.set("q", next.q.trim());
-    if (next.classification !== "unclassified") {
-      params.set("classification", next.classification);
+    if ((next.page ?? page) > 1) params.set("page", String(next.page ?? page));
+    if (merged.q.trim()) params.set("q", merged.q.trim());
+    if (merged.classification !== "unclassified") {
+      params.set("classification", merged.classification);
     }
-    if (next.sort !== "created") params.set("sort", next.sort);
-    if (next.order !== "desc") params.set("order", next.order);
-    if (next.created_gte.trim()) params.set("created_gte", next.created_gte.trim());
-    if (next.created_lte.trim()) params.set("created_lte", next.created_lte.trim());
-    if (next.correspondent.trim()) params.set("correspondent", next.correspondent.trim());
-    if (next.document_type.trim()) params.set("document_type", next.document_type.trim());
-    if (next.tag.trim()) params.set("tag", next.tag.trim());
-    if (next.completeness !== "any") params.set("completeness", next.completeness);
-    const query = params.toString();
-    return query ? `?${query}` : "";
+    if (merged.sort !== "created") params.set("sort", merged.sort);
+    if (merged.order !== "desc") params.set("order", merged.order);
+    if (merged.created_gte.trim()) params.set("created_gte", merged.created_gte.trim());
+    if (merged.created_lte.trim()) params.set("created_lte", merged.created_lte.trim());
+    if (merged.correspondent.trim()) params.set("correspondent", merged.correspondent.trim());
+    if (merged.document_type.trim()) params.set("document_type", merged.document_type.trim());
+    if (merged.tag.trim()) params.set("tag", merged.tag.trim());
+    if (merged.completeness !== "any") params.set("completeness", merged.completeness);
+    const nextView = next.view ?? view;
+    if (nextView === "grid") params.set("view", "grid");
+    const nextPreview = next.preview === undefined ? previewId : next.preview;
+    if (nextPreview) {
+      params.set("preview", String(nextPreview));
+      const title =
+        next.preview_title === undefined ? previewTitle : next.preview_title;
+      if (title && title !== "Document preview") params.set("preview_title", title);
+    }
+    setSearchParams(params, { replace: true });
   }
 
-  function pageHref(targetPage: number) {
-    return `/classify${listSearchString({ page: targetPage })}`;
+  function openPreview(paperlessDocumentId: number, title: string) {
+    writeParams({ preview: paperlessDocumentId, preview_title: title });
   }
 
-  function onFiltersChange(next: Partial<QueueFilters> & { page?: number }) {
-    const query = listSearchString(next);
-    setSearchParams(new URLSearchParams(query.startsWith("?") ? query.slice(1) : query), {
-      replace: true,
-    });
+  function closePreview() {
+    writeParams({ preview: null, preview_title: null });
   }
 
   async function reloadQueue() {
-    return fetchDocuments(buildListParams());
+    const next = await fetchDocuments(buildListParams());
+    setQueue(next);
+    return next;
   }
 
   useEffect(() => {
@@ -147,20 +253,13 @@ export function WorkbenchPage({ session, onSession }: Props) {
         if (cancelled) return;
         setQueue(queuePage);
         setTypes(relTypes);
-        if (selectedId) {
-          const detail = await fetchDocument(selectedId);
-          if (!cancelled) setDocument(detail);
-        } else {
-          setDocument(null);
-        }
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
           navigate("/connect");
           return;
         }
-        setError(err instanceof Error ? err.message : "Failed to load workbench");
-        setDocument(null);
+        setError(err instanceof Error ? err.message : "Failed to load Classify");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -168,9 +267,9 @@ export function WorkbenchPage({ session, onSession }: Props) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload on filter identity
   }, [
     page,
-    selectedId,
     filters.q,
     filters.classification,
     filters.sort,
@@ -184,6 +283,43 @@ export function WorkbenchPage({ session, onSession }: Props) {
     navigate,
   ]);
 
+  function toggle(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (!queue) return;
+    const ids = queue.items.map((item) => item.paperless_document_id);
+    const allSelected = ids.length > 0 && ids.every((id) => selected.has(id));
+    setSelected(allSelected ? new Set() : new Set(ids));
+  }
+
+  function onApplyFilters(event: FormEvent) {
+    event.preventDefault();
+    writeParams({ ...draft, page: 1 });
+  }
+
+  function onSortPreset(value: string) {
+    if (value === "newest") writeParams({ sort: "created", order: "desc", page: 1 });
+    else if (value === "oldest") writeParams({ sort: "created", order: "asc", page: 1 });
+    else if (value === "title") writeParams({ sort: "title", order: "asc", page: 1 });
+    else if (value === "correspondent") {
+      writeParams({ sort: "correspondent", order: "asc", page: 1 });
+    }
+  }
+
+  const emptyLabel =
+    filters.classification === "classified"
+      ? "No classified documents in this page."
+      : filters.classification === "any"
+        ? "No documents in this page."
+        : "No unclassified documents in this page.";
+
   const panelTitle =
     filters.classification === "classified"
       ? "Classified documents"
@@ -191,107 +327,296 @@ export function WorkbenchPage({ session, onSession }: Props) {
         ? "Documents"
         : "Needs classification";
 
+  const queryForPage = (targetPage: number) => {
+    const params = new URLSearchParams(searchParams);
+    if (targetPage <= 1) params.delete("page");
+    else params.set("page", String(targetPage));
+    const query = params.toString();
+    return query ? `?${query}` : "";
+  };
+
   return (
-    <div className={`workbench workbench-classify${selectedId ? " detail-open" : ""}`}>
-      {error ? (
-        <div className="banner banner-error" role="alert" style={{ gridColumn: "1 / -1" }}>
-          {error}
-        </div>
-      ) : null}
-      {notice ? (
-        <div className="banner banner-success" role="status" style={{ gridColumn: "1 / -1" }}>
-          {notice}
-        </div>
-      ) : null}
+    <PageLayout width="wide">
+      <section className="explore-page classify-page" aria-labelledby="classify-title">
+        <header className="explore-header">
+          <div>
+            <h1 id="classify-title">Classify</h1>
+            <p className="muted">
+              Browse the classification queue with multi-select. Open any document in the shared
+              viewer.
+            </p>
+          </div>
+          <div className="explore-view-toggle" role="group" aria-label="Result layout">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              aria-pressed={view === "list"}
+              onClick={() => writeParams({ view: "list" })}
+            >
+              <List size={16} aria-hidden /> List
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              aria-pressed={view === "grid"}
+              onClick={() => writeParams({ view: "grid" })}
+            >
+              <LayoutGrid size={16} aria-hidden /> Grid
+            </button>
+          </div>
+        </header>
 
-      <section className="panel queue-panel" aria-labelledby="queue-title">
-        <h1 id="queue-title">{panelTitle}</h1>
-        {loading && !queue ? (
-          <p role="status">Loading queue…</p>
-        ) : (
-          <DocumentQueue
-            queue={queue}
-            selectedId={selectedId}
-            page={page}
-            filters={filters}
-            types={types}
-            csrfToken={session.csrf_token}
-            pageHref={pageHref}
-            onSelect={(id) => navigate(`/documents/${id}${listSearchString()}`)}
-            onFiltersChange={onFiltersChange}
-            onBulkDone={async (message) => {
-              setNotice(message);
-              await refreshCsrf();
-              setQueue(await reloadQueue());
-            }}
-            onError={setError}
-          />
-        )}
-      </section>
+        {error ? (
+          <div className="banner banner-error" role="alert">
+            {error}
+          </div>
+        ) : null}
+        {notice ? (
+          <div className="banner banner-success" role="status">
+            {notice}
+          </div>
+        ) : null}
 
-      <section className="panel detail-panel" aria-labelledby="detail-title">
-        {selectedId && document ? (
-          <>
-            <div className="sticky-actions" style={{ top: 0 }}>
-              <Link className="btn btn-secondary" to={`/classify${listSearchString()}`}>
-                Back to queue
-              </Link>
-            </div>
-            <SemanticDocumentDetail
-              layout="workbench"
-              document={document}
-              csrfToken={session.csrf_token}
-              onAddRelationship={() => {
-                window.document
-                  .getElementById("relationship-composer")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }}
-              onRemoved={async (nextDoc, message) => {
-                setDocument(nextDoc);
-                setNotice(message);
-                await refreshCsrf();
-                setQueue(await reloadQueue());
-              }}
-              onReplaced={async (nextDoc, message) => {
-                setDocument(nextDoc);
-                setNotice(message);
-                await refreshCsrf();
-                setQueue(await reloadQueue());
-                navigate(`/documents/${nextDoc.paperless_document_id}${listSearchString()}`);
-              }}
-              onDocumentDeleted={async () => {
-                setNotice("Document deleted");
-                await refreshCsrf();
-                setDocument(null);
-                setQueue(await reloadQueue());
-                navigate(`/classify${listSearchString()}`);
-              }}
-              onError={setError}
+        <p className="muted classify-queue-label">{panelTitle}</p>
+
+        <form className="explore-filters" onSubmit={onApplyFilters}>
+          <div className="field">
+            <label htmlFor="classify-q">Search</label>
+            <input
+              id="classify-q"
+              value={draft.q}
+              onChange={(event) => setDraft({ ...draft, q: event.target.value })}
+              placeholder="Title or text"
             />
-            <RelationshipComposer
-              documentId={document.paperless_document_id}
+          </div>
+          <div className="field">
+            <label htmlFor="classify-created-gte">Created from</label>
+            <input
+              id="classify-created-gte"
+              type="date"
+              value={draft.created_gte}
+              onChange={(event) => setDraft({ ...draft, created_gte: event.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="classify-created-lte">Created to</label>
+            <input
+              id="classify-created-lte"
+              type="date"
+              value={draft.created_lte}
+              onChange={(event) => setDraft({ ...draft, created_lte: event.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="classify-correspondent">Correspondent</label>
+            <input
+              id="classify-correspondent"
+              value={draft.correspondent}
+              onChange={(event) => setDraft({ ...draft, correspondent: event.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="classify-document-type">Document type</label>
+            <input
+              id="classify-document-type"
+              value={draft.document_type}
+              onChange={(event) => setDraft({ ...draft, document_type: event.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="classify-tag">Tag</label>
+            <input
+              id="classify-tag"
+              value={draft.tag}
+              onChange={(event) => setDraft({ ...draft, tag: event.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="classify-classification">Classification</label>
+            <select
+              id="classify-classification"
+              value={draft.classification}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  classification: event.target.value as ClassificationFilter,
+                })
+              }
+            >
+              <option value="unclassified">Unclassified</option>
+              <option value="classified">Classified</option>
+              <option value="any">Any</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="classify-completeness">Completeness</label>
+            <select
+              id="classify-completeness"
+              value={draft.completeness}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  completeness: event.target.value as CompletenessFilter,
+                })
+              }
+            >
+              <option value="any">Any</option>
+              <option value="empty">Empty</option>
+              <option value="partial">Partial</option>
+              <option value="classified">Classified</option>
+              <option value="needs_review">Needs review</option>
+              <option value="complete">Complete (legacy)</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="classify-sort">Sort</label>
+            <select
+              id="classify-sort"
+              value={sortPreset(filters.sort, filters.order)}
+              onChange={(event) => onSortPreset(event.target.value)}
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="title">Title</option>
+              <option value="correspondent">Correspondent</option>
+            </select>
+          </div>
+          <div className="field explore-filters-actions">
+            <button type="submit" className="btn btn-primary">
+              Apply filters
+            </button>
+          </div>
+        </form>
+
+        <ClassifyBatchBar
+          selectedCount={selected.size}
+          onClear={() => setSelected(new Set())}
+          onAddRelationship={() => setBatchOpen(true)}
+        />
+
+        {loading && !queue ? (
+          <p className="muted" role="status">
+            Loading Classify…
+          </p>
+        ) : null}
+
+        {queue ? (
+          <>
+            <div className="classify-select-bar">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={
+                    queue.items.length > 0 &&
+                    queue.items.every((item) => selected.has(item.paperless_document_id))
+                  }
+                  onChange={toggleAll}
+                  disabled={queue.items.length === 0}
+                />{" "}
+                Select page
+              </label>
+              <span className="muted" style={{ fontVariantNumeric: "tabular-nums" }}>
+                Page {queue.page} · {queue.items.length} shown · {queue.paperless_count} total
+                {selected.size > 0 ? ` · ${selected.size} selected` : ""}
+              </span>
+            </div>
+
+            {queue.items.length === 0 ? (
+              <p className="empty">{emptyLabel}</p>
+            ) : (
+              <div
+                className={`explore-results explore-results-${view}`}
+                aria-busy={loading}
+                aria-live="polite"
+              >
+                {queue.items.map((item) => {
+                  const card = queueItemToCard(item);
+                  return (
+                    <DocumentCard
+                      key={item.paperless_document_id}
+                      item={card}
+                      view={view}
+                      onPreview={openPreview}
+                      selectable
+                      selected={selected.has(item.paperless_document_id)}
+                      onToggleSelect={() => toggle(item.paperless_document_id)}
+                    />
+                  );
+                })}
+              </div>
+            )}
+
+            <nav className="explore-pagination" aria-label="Classify pagination">
+              {queue.has_previous ? (
+                <Link className="btn btn-secondary" to={`/classify${queryForPage(page - 1)}`}>
+                  Previous
+                </Link>
+              ) : (
+                <button type="button" className="btn btn-secondary" disabled>
+                  Previous
+                </button>
+              )}
+              <span className="muted">Page {queue.page}</span>
+              {queue.has_next && queue.next_page ? (
+                <Link
+                  className="btn btn-secondary"
+                  to={`/classify${queryForPage(queue.next_page)}`}
+                >
+                  Next
+                </Link>
+              ) : (
+                <button type="button" className="btn btn-secondary" disabled>
+                  Next
+                </button>
+              )}
+            </nav>
+          </>
+        ) : null}
+
+        {previewId ? (
+          <DocumentViewerModal
+            paperlessDocumentId={previewId}
+            title={previewTitle}
+            onClose={closePreview}
+            sidePanel={
+              <DocumentClassifyPanel
+                paperlessDocumentId={previewId}
+                csrfToken={session.csrf_token}
+                types={types}
+                onError={setError}
+                onChanged={async () => {
+                  await refreshCsrf();
+                  await reloadQueue();
+                }}
+                onDocumentDeleted={async () => {
+                  setNotice("Document deleted");
+                  closePreview();
+                  await refreshCsrf();
+                  await reloadQueue();
+                }}
+              />
+            }
+          />
+        ) : null}
+
+        {batchOpen ? (
+          <Dialog title="Batch classification" onClose={() => setBatchOpen(false)}>
+            <BulkRelationshipForm
+              selectedIds={[...selected]}
               types={types}
               csrfToken={session.csrf_token}
-              onSaved={async (nextDoc) => {
-                setDocument(nextDoc);
-                setNotice("Relationship saved");
+              onDone={async (message) => {
+                setNotice(message);
+                setSelected(new Set());
+                setBatchOpen(false);
                 await refreshCsrf();
-                setQueue(await reloadQueue());
+                await reloadQueue();
               }}
               onError={setError}
             />
-          </>
-        ) : selectedId && loading ? (
-          <p role="status">Loading document…</p>
-        ) : (
-          <>
-            <h1 id="detail-title">Select a document</h1>
-            <p className="empty">
-              Choose a document from the queue to classify with an embedded preview and relationships.
-            </p>
-          </>
-        )}
+          </Dialog>
+        ) : null}
       </section>
-    </div>
+    </PageLayout>
   );
 }
