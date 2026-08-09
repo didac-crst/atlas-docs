@@ -546,6 +546,20 @@ class PaperlessClient:
 
     def permanently_delete_document(self, document_id: int, token: str) -> None:
         """Permanently purge via POST /api/trash/ action=empty."""
+        was_trashed = any(
+            doc.id == document_id
+            for doc in self.iter_trashed_documents(token, page_size=100)
+        )
+        if not was_trashed:
+            try:
+                self.get_document(document_id, token)
+            except PaperlessNotFoundError:
+                # Already purged — treat as idempotent success.
+                return
+            raise PaperlessUnavailableError(
+                f"Document {document_id} is not in Paperless trash"
+            )
+
         url = f"{self._base_url}/api/trash/"
         response = self._request(
             "POST",
@@ -553,11 +567,19 @@ class PaperlessClient:
             token,
             json={"action": "empty", "documents": [document_id]},
         )
-        if response.status_code in {200, 204}:
-            return
-        if response.status_code == 404:
-            return
-        self._raise_for_status(response, document_id=document_id)
+        if response.status_code not in {200, 204}:
+            if response.status_code == 404:
+                return
+            self._raise_for_status(response, document_id=document_id)
+
+        still_trashed = any(
+            doc.id == document_id
+            for doc in self.iter_trashed_documents(token, page_size=100)
+        )
+        if still_trashed:
+            raise PaperlessUnavailableError(
+                f"Paperless trash empty did not purge document {document_id}"
+            )
 
     def list_document_versions(
         self, document_id: int, token: str

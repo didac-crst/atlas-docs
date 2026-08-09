@@ -61,7 +61,12 @@ describe("EntityDetailPage", () => {
         <Routes>
           <Route
             path="/entities/:entityId"
-            element={<EntityDetailPage session={{ authenticated: true, csrf_token: "csrf" }} />}
+            element={
+              <EntityDetailPage
+                session={{ authenticated: true, csrf_token: "csrf" }}
+                onSession={() => undefined}
+              />
+            }
           />
         </Routes>
       </MemoryRouter>,

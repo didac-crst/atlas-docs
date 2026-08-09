@@ -319,6 +319,16 @@ def test_download_variants_forward_query_and_secure_headers(
     assert "bff-download-token" not in versioned.text
     assert any("version=7" in call for call in paperless_transport.calls)
 
+    combined = client.get(
+        "/ui/api/documents/184/download",
+        params={"original": "true", "version": "7"},
+    )
+    assert combined.status_code == 200
+    assert combined.headers.get("cache-control") == "no-store"
+    assert any(
+        "original=true" in call and "version=7" in call for call in paperless_transport.calls
+    )
+
 
 def test_document_detail_includes_versions(client: TestClient) -> None:
     detail = client.get("/documents/184", headers=AUTH).json()
@@ -354,6 +364,30 @@ def test_reconcile_reports_trashed_documents(
     assert "bff-download-token" not in result.text
 
 
+def test_reconcile_applies_paperless_trash_without_prior_atlas_delete(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    client.post(
+        "/documents/184/relationships",
+        headers=AUTH,
+        json={"relationship": "source-country", "target": "Germany"},
+    )
+    # Simulate Paperless-side trash without going through Atlas delete.
+    paperless_transport.trashed_documents[184] = paperless_transport.documents.pop(184)
+    csrf = _connect(client, token="reconcile-apply-token")
+    result = client.post(
+        "/ui/api/reconcile",
+        headers={"X-CSRF-Token": csrf},
+        json={"dry_run": False},
+    )
+    assert result.status_code == 200
+    body = result.json()
+    assert 184 in body["trashed_in_paperless"]
+    detail = client.get("/documents/184", headers=AUTH)
+    assert detail.status_code == 200
+    assert detail.json()["trashed"] is True
+
+
 def test_tombstone_hides_metadata_after_permanent_delete(
     client: TestClient, paperless_transport: FakePaperlessTransport
 ) -> None:
@@ -382,3 +416,31 @@ def test_tombstone_hides_metadata_after_permanent_delete(
         assert entity.deleted_at is not None
     finally:
         db.close()
+
+
+def test_rename_rejects_invalid_entity_id(client: TestClient) -> None:
+    response = client.post(
+        "/entities/not-a-uuid/rename",
+        headers=AUTH,
+        json={"display_name": "Nope"},
+    )
+    assert response.status_code == 422
+
+
+def test_trashed_document_requires_trash_listing_access(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    client.post(
+        "/documents/184/relationships",
+        headers=AUTH,
+        json={"relationship": "source-country", "target": "Germany"},
+    )
+    client.request(
+        "DELETE",
+        "/documents/184",
+        headers=AUTH,
+        json={"confirm": True, "permanent": False},
+    )
+    assert client.get("/documents/184", headers=AUTH).status_code == 200
+    paperless_transport.denied.add(184)
+    assert client.get("/documents/184", headers=AUTH).status_code == 404

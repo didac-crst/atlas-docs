@@ -4,7 +4,7 @@ Forward-looking milestones and explicitly deferred work. Implemented behavior
 is documented in [architecture.md](architecture.md) and related canonical docs.
 Historical milestone plans live under [archive/](archive/).
 
-## Current baseline (v0.6)
+## Current baseline (v0.6 + v0.7 pending merge)
 
 - Entity + ExternalReference core; entity relationship API and document facade
 - Deterministic Paperless reconciliation without auto-delete
@@ -16,6 +16,9 @@ Historical milestone plans live under [archive/](archive/).
   token in the browser)
 - Explore (documents and concepts), entity detail with backlinks, semantic
   completeness, document delete/replace with tombstones and replacement history
+- v0.7 lifecycle categories, Evidence trash via Paperless, Master Data
+  safeguards, Explore Documents | Knowledge, and product identity (implemented
+  on `feat/v07-product-experience`; treat as baseline once merged)
 
 Design contracts:
 [v0.6 Explore and Semantic Workbench](v0.6-explore-semantic-workbench.md)
@@ -23,7 +26,7 @@ Design contracts:
 · [v0.5 ingestion & classification](v0.5-ingestion-classification-spec.md)
 · [ADR 0002](adr/0002-v05-session-ingest-security.md).
 
-## Next sprint (v0.7)
+## v0.7 (implemented, pending release)
 
 **Product experience and entity lifecycle** — make AtlasDocs feel like an
 entity-centered semantic application rather than a document queue with semantic

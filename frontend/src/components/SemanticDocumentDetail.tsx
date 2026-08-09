@@ -194,7 +194,11 @@ export function SemanticDocumentDetail({
       <header className="doc-header">
         <p className="muted">
           <span className="entity-chip" data-kind="document">
-            Evidence
+            {document.lifecycle_category === "organizational"
+              ? "Organizational"
+              : document.lifecycle_category === "master_data"
+                ? "Master Data"
+                : "Evidence"}
           </span>
           {document.trashed ? " · In trash" : null}
         </p>

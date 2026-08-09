@@ -103,26 +103,25 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
 
   await page.getByRole("link", { name: /^Classify$/i }).first().click();
   await expect(page.getByRole("heading", { name: /Needs classification|Classify|Documents/i })).toBeVisible();
+  // Shared e2e server may retain prior classification; use Any so the queue is populated.
+  await page.getByLabel(/^Classification$/i).selectOption("any");
+  await page.getByRole("button", { name: /Apply filters/i }).click();
+  await expect(page.getByText(/No unclassified documents|No documents|shown/i).first()).toBeVisible();
 
-  // Select two docs when checkboxes are present
   const checkboxes = page.locator('input[type="checkbox"]');
-  const count = await checkboxes.count();
-  if (count >= 2) {
-    await checkboxes.nth(0).check();
-    await checkboxes.nth(1).check();
-    // Bulk assign offers Concept/Document targets; document-type is valid for Concept.
-    await page.getByLabel(/Target entity type/i).first().selectOption("concept");
-    await page.getByLabel(/Relationship type/i).first().selectOption("document-type");
-    const target = page.getByLabel(/^Target$/i).first();
-    if (await target.count()) {
-      await target.fill("Inv");
-      const option = page.getByRole("option", { name: /Invoice/i });
-      if (await option.count()) {
-        await option.first().click();
-        await page.getByRole("button", { name: /Assign to selected/i }).first().click();
-      }
-    }
-  }
+  await expect(checkboxes.nth(1)).toBeVisible({ timeout: 15000 });
+  await checkboxes.nth(0).check();
+  await checkboxes.nth(1).check();
+  // Bulk assign offers Concept/Document targets; document-type is valid for Concept.
+  await page.getByLabel(/Target entity type/i).first().selectOption("concept");
+  await page.getByLabel(/Relationship type/i).first().selectOption("document-type");
+  const target = page.getByLabel(/^Target$/i).first();
+  await expect(target).toBeVisible();
+  await target.fill("Inv");
+  const option = page.getByRole("option", { name: /Invoice/i });
+  await expect(option.first()).toBeVisible({ timeout: 10000 });
+  await option.first().click();
+  await page.getByRole("button", { name: /Assign to selected/i }).first().click();
 
   await page.goto("./documents/184");
   const detail = page.locator(".detail-panel");
@@ -144,8 +143,11 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   await expect(paperless).toHaveAttribute("target", "_blank");
 
   await detail.getByRole("button", { name: /^Move to trash$/i }).click();
+  await expect(detail.getByRole("alertdialog")).toBeVisible();
   await expect(detail.getByText(/Move this document to Paperless trash/i)).toBeVisible();
   await detail.getByRole("button", { name: /^Cancel$/i }).click();
+  await expect(detail.getByRole("alertdialog")).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: /^Move to trash$/i })).toBeVisible();
   await expect(page.getByText(password)).toHaveCount(0);
 
   await page.getByRole("button", { name: /^ada$/i }).click();

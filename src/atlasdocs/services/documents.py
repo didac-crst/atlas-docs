@@ -6,7 +6,7 @@ from datetime import datetime
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from atlasdocs.config import UNCLASSIFIED_MAX_UPSTREAM_PAGES, UNCLASSIFIED_PAGE_SIZE, get_settings
 from atlasdocs.db.models import (
@@ -268,7 +268,7 @@ class DocumentService:
         self._session = session
         self._paperless = paperless
         self._settings = get_settings()
-        self._paperless_doc_cache: dict[tuple[str, int], PaperlessDocument] = {}
+        self._paperless_doc_cache: dict[tuple, PaperlessDocument] = {}
         self._validated_tokens: set[str] = set()
 
     def _require_token(self, token: str | None) -> str:
@@ -307,6 +307,28 @@ class DocumentService:
         self._paperless_doc_cache[cache_key] = document
         self._validated_tokens.add(token)
         return document
+
+    def _ensure_trashed_paperless_access(
+        self, paperless_document_id: int, token: str
+    ) -> PaperlessDocument:
+        """Authorize a trashed document via the caller's Paperless trash listing."""
+        cache_key = (token, paperless_document_id, "trash")
+        cached = self._paperless_doc_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            for doc in self._paperless.iter_trashed_documents(token, page_size=100):
+                if doc.id == paperless_document_id:
+                    self._paperless_doc_cache[cache_key] = doc
+                    self._validated_tokens.add(token)
+                    return doc
+        except PaperlessAuthError as exc:
+            raise ForbiddenDocumentError(str(exc)) from exc
+        except PaperlessUnavailableError as exc:
+            raise UpstreamError(str(exc)) from exc
+        except PaperlessError as exc:
+            raise UpstreamError(str(exc)) from exc
+        raise NotFoundError("Document not found")
 
     def _paperless_external_id(self, paperless_document_id: int) -> str:
         return str(paperless_document_id)
@@ -1009,11 +1031,7 @@ class DocumentService:
         self._reject_if_deleted(entity)
         paperless_doc: PaperlessDocument | None
         if entity is not None and entity.trashed_at is not None:
-            self._validate_paperless_token(auth)
-            paperless_doc = PaperlessDocument(
-                id=paperless_document_id,
-                title=f"Document {paperless_document_id}",
-            )
+            paperless_doc = self._ensure_trashed_paperless_access(paperless_document_id, auth)
         else:
             paperless_doc = self._ensure_paperless_access(paperless_document_id, auth)
         versions: list[DocumentVersionView] = []
@@ -1241,6 +1259,12 @@ class DocumentService:
             actor_label=actor_label,
         )
 
+    def _parse_entity_id(self, entity_id: str) -> uuid.UUID:
+        try:
+            return uuid.UUID(entity_id)
+        except ValueError as exc:
+            raise ValidationError("Invalid entity id") from exc
+
     def rename_entity(
         self,
         entity_id: str,
@@ -1248,7 +1272,7 @@ class DocumentService:
         token: str | None = None,
     ) -> EntityView:
         auth = self._require_token(token)
-        entity = self._load_entity(uuid.UUID(entity_id))
+        entity = self._load_entity(self._parse_entity_id(entity_id))
         self._reject_if_deleted(entity)
         self._assert_master_or_organizational(entity, action="Rename")
         self._assert_not_archived(entity)
@@ -1264,7 +1288,7 @@ class DocumentService:
 
     def archive_entity(self, entity_id: str, token: str | None = None) -> EntityView:
         auth = self._require_token(token)
-        entity = self._load_entity(uuid.UUID(entity_id))
+        entity = self._load_entity(self._parse_entity_id(entity_id))
         self._reject_if_deleted(entity)
         self._assert_master_or_organizational(entity, action="Archive")
         self._validate_paperless_token(auth)
@@ -1274,7 +1298,7 @@ class DocumentService:
 
     def restore_entity(self, entity_id: str, token: str | None = None) -> EntityView:
         auth = self._require_token(token)
-        entity = self._load_entity(uuid.UUID(entity_id))
+        entity = self._load_entity(self._parse_entity_id(entity_id))
         self._reject_if_deleted(entity)
         self._assert_master_or_organizational(entity, action="Restore")
         self._validate_paperless_token(auth)
@@ -1290,8 +1314,8 @@ class DocumentService:
     ) -> EntityView:
         """Record merge intent without migrating edges (v0.7 placeholder)."""
         auth = self._require_token(token)
-        source = self._load_entity(uuid.UUID(source_entity_id))
-        target = self._load_entity(uuid.UUID(target_entity_id))
+        source = self._load_entity(self._parse_entity_id(source_entity_id))
+        target = self._load_entity(self._parse_entity_id(target_entity_id))
         self._reject_if_deleted(source)
         self._reject_if_deleted(target)
         self._assert_master_or_organizational(source, action="Merge")
@@ -1318,7 +1342,7 @@ class DocumentService:
         if not confirm:
             raise ValidationError("Deletion requires explicit confirmation")
         auth = self._require_token(token)
-        entity = self._load_entity(uuid.UUID(entity_id))
+        entity = self._load_entity(self._parse_entity_id(entity_id))
         self._reject_if_deleted(entity)
         category = self._lifecycle_category_for_entity(entity)
         if category == LIFECYCLE_EVIDENCE:
@@ -2196,7 +2220,8 @@ class DocumentService:
             select(Concept)
             .options(
                 joinedload(Concept.ontology),
-                joinedload(Concept.entity),
+                joinedload(Concept.entity).selectinload(Entity.outgoing_relationships),
+                joinedload(Concept.entity).selectinload(Entity.incoming_relationships),
             )
             .join(Entity, Entity.id == Concept.id)
             .where(Entity.deleted_at.is_(None), Entity.archived_at.is_(None))

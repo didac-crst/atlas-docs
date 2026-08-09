@@ -106,6 +106,7 @@ def test_delete_tombstones_and_hides_from_queries(
     )
     assert deleted.status_code == 204
     assert 184 in paperless_transport.deleted_document_ids
+    assert 184 in paperless_transport.purged_document_ids
     assert "Token " not in (deleted.text or "")
 
     assert client.get("/documents/184", headers=AUTH).status_code == 404

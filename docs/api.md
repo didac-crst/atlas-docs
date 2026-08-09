@@ -36,7 +36,7 @@ Router: `src/atlasdocs/api/routes.py`.
 | POST | `/ingest` | Multipart upload → durable job (new logical document / new entity) |
 | GET | `/ingest/jobs` | Jobs for the calling token fingerprint |
 | GET | `/ingest/jobs/{job_id}` | Job status |
-| GET | `/explore` | Entity-oriented Explore (`mode=documents\|knowledge\|people|…`) |
+| GET | `/explore` | Entity-oriented Explore (`mode=documents, knowledge, people, …`) |
 | GET | `/entity-types` | Entity type registry (incl. `lifecycle_category`) |
 | GET | `/entities/search` | Entity search / autocomplete |
 | GET | `/entities/{entity_id}` | Entity detail + outgoing relationships, backlinks, related documents |

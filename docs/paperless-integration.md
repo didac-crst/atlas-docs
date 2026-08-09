@@ -37,6 +37,13 @@ Rules:
   (userinfo is rejected at settings validation).
 - Links never include Paperless tokens.
 
+## Supported Paperless version
+
+Trash restore/empty and document **file version** downloads (`versions`,
+`version=`, `original=true`) require **Paperless-ngx 3.0.0+**. AtlasDocs is
+verified against 3.0.5 (API v10). Older Paperless builds may reject version
+query parameters or lack `/api/trash/` actions.
+
 ## Authorization
 
 - UI login exchanges Paperless username/password **server-side** for a token

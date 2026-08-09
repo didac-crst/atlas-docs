@@ -50,7 +50,7 @@ class ReconcileSummary:
             f"  Missing in Paperless: {len(self.missing_in_paperless)}",
             f"  Inaccessible in Paperless: {len(self.inaccessible_in_paperless)}",
             f"  Trashed in Paperless: {len(self.trashed_in_paperless)}",
-            f"  Purged (tombstoned locally): {len(self.purged_in_paperless)}",
+            f"  Purged in Paperless (not tombstoned locally): {len(self.purged_in_paperless)}",
         ]
         if self.errors:
             lines.append(f"  Errors: {len(self.errors)}")
@@ -104,31 +104,27 @@ class ReconcileService:
                 summary.created.append(doc.id)
             if not dry_run:
                 self._session.flush()
-
-            # Collection-level trash scan (Paperless soft-deleted documents).
-            try:
-                for doc in self._paperless.iter_trashed_documents(
-                    token, page_size=page_size, limit=limit
-                ):
-                    trashed_ids.add(doc.id)
-                    summary.trashed_in_paperless.append(doc.id)
-                    existing = self._documents.get_external_reference(doc.id)
-                    if existing is not None and existing.entity is not None:
-                        if existing.entity.deleted_at is not None:
-                            continue
-                        if not dry_run and existing.entity.trashed_at is None:
-                            existing.entity.trashed_at = utcnow()
-                if not dry_run:
-                    self._session.flush()
-            except (PaperlessAuthError, PaperlessNotFoundError, PaperlessUnavailableError) as exc:
-                summary.errors.append(f"trash scan: {exc}")
         except (PaperlessAuthError, PaperlessNotFoundError, PaperlessUnavailableError) as exc:
             summary.errors.append(str(exc))
             return summary
-        except TypeError:
-            # Fake/client without trash iteration — skip collection trash pass.
-            pass
 
+        # Collection-level trash scan (Paperless soft-deleted documents).
+        try:
+            for doc in self._paperless.iter_trashed_documents(
+                token, page_size=page_size, limit=limit
+            ):
+                trashed_ids.add(doc.id)
+                summary.trashed_in_paperless.append(doc.id)
+                existing = self._documents.get_external_reference(doc.id)
+                if existing is not None and existing.entity is not None:
+                    if existing.entity.deleted_at is not None:
+                        continue
+                    if not dry_run and existing.entity.trashed_at is None:
+                        existing.entity.trashed_at = utcnow()
+            if not dry_run:
+                self._session.flush()
+        except (PaperlessAuthError, PaperlessNotFoundError, PaperlessUnavailableError) as exc:
+            summary.errors.append(f"trash scan: {exc}")
         refs = self._documents.list_paperless_external_references()
         for ref in refs:
             if ref.entity is not None and ref.entity.deleted_at is not None:

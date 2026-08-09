@@ -182,7 +182,7 @@ export function App() {
             path="/entities/:entityId"
             element={
               authenticated && session ? (
-                <EntityDetailPage session={session} />
+                <EntityDetailPage session={session} onSession={setSession} />
               ) : (
                 <Navigate to="/connect" replace />
               )

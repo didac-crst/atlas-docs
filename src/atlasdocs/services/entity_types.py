@@ -26,8 +26,8 @@ class EntityTypeInfo:
     valid_relationship_target: bool
     has_dedicated_page: bool
     lifecycle_category: str
-    """Ontology code when this display type is backed by concepts; None for documents."""
     ontology_code: str | None = None
+    """Ontology code when this display type is backed by concepts; None for documents."""
 
 
 ENTITY_TYPE_REGISTRY: tuple[EntityTypeInfo, ...] = (

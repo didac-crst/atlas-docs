@@ -20,6 +20,10 @@ from atlasdocs.db.models import (
     RelationshipType,
 )
 from atlasdocs.db.session import get_engine, get_session_factory
+from atlasdocs.services.entity_types import (
+    lifecycle_category_for_registry_code,
+    registry_code_for_ontology,
+)
 
 
 def load_seed_file(path: Path) -> dict:
@@ -70,8 +74,8 @@ def apply_seed(session: Session, data: dict) -> None:
                     id=uuid.uuid4(),
                     entity_type=EntityType.concept,
                     semantic_completeness="empty",
-                    lifecycle_category=(
-                        "organizational" if ontology.code == "case" else "master_data"
+                    lifecycle_category=lifecycle_category_for_registry_code(
+                        registry_code_for_ontology(ontology.code)
                     ),
                 )
                 session.add(entity)

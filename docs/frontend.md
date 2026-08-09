@@ -87,7 +87,7 @@ Disconnect live under the account menu.
 | GET | `/ui/api/documents/{id}` | Document detail + relationships |
 | DELETE | `/ui/api/documents/{id}` | Evidence trash (`confirm`) or permanent (`confirm` + `permanent`) |
 | POST | `/ui/api/documents/{id}/restore` | Restore Evidence from Paperless trash |
-| POST | `/ui/api/entities/{id}/rename` | Master Data rename |
+| POST | `/ui/api/entities/{id}/rename` | Master Data / Organizational rename |
 | POST | `/ui/api/entities/{id}/archive` | Archive |
 | POST | `/ui/api/entities/{id}/restore` | Restore archived entity |
 | POST | `/ui/api/entities/{id}/merge` | Merge redirect placeholder |

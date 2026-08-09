@@ -4,6 +4,7 @@ import {
   ApiError,
   archiveEntity,
   fetchEntity,
+  getSession,
   mergeEntityPlaceholder,
   renameEntity,
   restoreEntity,
@@ -13,6 +14,7 @@ import {
 
 type Props = {
   session: SessionInfo;
+  onSession: (session: SessionInfo) => void;
 };
 
 function completenessLabel(value: string): string {
@@ -43,7 +45,7 @@ function categoryLabel(value: string | undefined): string {
   }
 }
 
-export function EntityDetailPage({ session }: Props) {
+export function EntityDetailPage({ session, onSession }: Props) {
   const { entityId } = useParams();
   const navigate = useNavigate();
   const [entity, setEntity] = useState<EntityDetail | null>(null);
@@ -60,6 +62,7 @@ export function EntityDetailPage({ session }: Props) {
     (async () => {
       setLoading(true);
       setError(null);
+      setEntity(null);
       try {
         const next = await fetchEntity(entityId);
         if (!cancelled) {
@@ -102,8 +105,14 @@ export function EntityDetailPage({ session }: Props) {
       setEntity(next);
       setRenameValue(next.label);
       setNotice(message);
+      onSession(await getSession());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Action failed");
+      try {
+        onSession(await getSession());
+      } catch {
+        /* keep prior session on refresh failure */
+      }
     } finally {
       setBusy(false);
     }

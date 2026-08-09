@@ -137,19 +137,24 @@ class FakePaperlessTransport(httpx.BaseTransport):
                 return httpx.Response(200, json={"ok": True})
             if action == "empty":
                 for doc_id in ids:
+                    if doc_id not in self.trashed_documents:
+                        continue
                     if doc_id in self.delete_denied:
                         return httpx.Response(403, json={"detail": "forbidden"})
                     self.trashed_documents.pop(doc_id, None)
                     self.documents.pop(doc_id, None)
                     self.purged_document_ids.append(doc_id)
-                    self.deleted_document_ids.append(doc_id)
                 return httpx.Response(200, json={"ok": True})
             return httpx.Response(400, json={"detail": "unknown action"})
 
         if path.endswith("/api/trash") and request.method == "GET":
             if not self._authorized(request):
                 return httpx.Response(401, json={"detail": "unauthorized"})
-            results = list(self.trashed_documents.values())
+            results = [
+                doc
+                for doc_id, doc in self.trashed_documents.items()
+                if doc_id not in self.denied
+            ]
             return httpx.Response(
                 200,
                 json={"count": len(results), "next": None, "previous": None, "results": results},
