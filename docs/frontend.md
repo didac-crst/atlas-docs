@@ -62,6 +62,7 @@ header. The SPA does not send the Paperless token to those paths.
 | Path | Screen |
 | --- | --- |
 | `/ui/` | Home task chooser |
+| `/ui/explore` | Explore browse (modes, filters, list/grid) |
 | `/ui/classify` | Searchable classification workbench + bulk assign |
 | `/ui/ingest` | Upload + ingestion job list |
 | `/ui/documents/:id` | Document detail + composer |

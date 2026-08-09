@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDocumentsQuery,
+  buildExploreQuery,
   filterConcepts,
   formatCountStat,
   jobNeedsPolling,
@@ -65,6 +66,28 @@ describe("buildDocumentsQuery", () => {
 
   it("omits completeness=any from the query string", () => {
     expect(buildDocumentsQuery({ page: 1, completeness: "any" })).toBe("page=1");
+  });
+});
+
+describe("buildExploreQuery", () => {
+  it("defaults to documents mode and page 1", () => {
+    expect(buildExploreQuery()).toBe("mode=documents&page=1");
+  });
+
+  it("encodes explore filters and omits completeness=any", () => {
+    expect(
+      buildExploreQuery({
+        mode: "people",
+        page: 2,
+        q: " Ali ",
+        sort: "title",
+        order: "asc",
+        completeness: "any",
+        relationship_type: "concerns-person",
+      }),
+    ).toBe(
+      "mode=people&page=2&q=Ali&sort=title&order=asc&relationship_type=concerns-person",
+    );
   });
 });
 

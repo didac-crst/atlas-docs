@@ -112,7 +112,77 @@ export type HomeSummary = {
   recent_knowledge: RecentKnowledge[];
 };
 
-export type EntitySearchType = "document" | "concept" | "any";
+export type EntitySearchType =
+  | "document"
+  | "concept"
+  | "any"
+  | "person"
+  | "organization"
+  | "country"
+  | "case";
+
+export type ExploreMode =
+  | "all"
+  | "documents"
+  | "people"
+  | "organizations"
+  | "countries"
+  | "cases"
+  | "concepts";
+
+export type ExploreView = "list" | "grid";
+
+export type ExploreResultItem = {
+  id: string | null;
+  label: string;
+  entity_type: string;
+  semantic_completeness: string;
+  subtitle: string | null;
+  paperless_document_id: number | null;
+  open_url: string | null;
+  preview_available: boolean;
+  download_available: boolean;
+  relationship_summary: string[];
+  created_date: string | null;
+  correspondent: string | null;
+  document_type: string | null;
+};
+
+export type ExplorePage = {
+  items: ExploreResultItem[];
+  page: number;
+  page_size: number;
+  mode: string;
+  has_next: boolean;
+  has_previous: boolean;
+  next_page: number | null;
+  total_hint: number | null;
+};
+
+export type EntityTypeInfo = {
+  code: string;
+  label: string;
+  icon: string;
+  searchable: boolean;
+  valid_relationship_target: boolean;
+  has_dedicated_page: boolean;
+};
+
+export type ExploreListParams = {
+  mode?: ExploreMode;
+  page?: number;
+  page_size?: number;
+  q?: string;
+  sort?: DocumentSort;
+  order?: SortOrder;
+  created_gte?: string;
+  created_lte?: string;
+  correspondent?: string;
+  document_type?: string;
+  tag?: string;
+  completeness?: CompletenessFilter;
+  relationship_type?: string;
+};
 
 export type EntitySearchHit = {
   id: string | null;
@@ -312,6 +382,38 @@ export function searchEntities(
 export function fetchDocuments(params: DocumentListParams = {}) {
   const query = buildDocumentsQuery(params);
   return apiFetch<QueuePage>(`/ui/api/documents?${query}`);
+}
+
+/** Build query string for GET /ui/api/explore. */
+export function buildExploreQuery(params: ExploreListParams = {}): string {
+  const search = new URLSearchParams();
+  search.set("mode", params.mode ?? "documents");
+  search.set("page", String(params.page ?? 1));
+  if (params.page_size) search.set("page_size", String(params.page_size));
+  if (params.q?.trim()) search.set("q", params.q.trim());
+  if (params.sort) search.set("sort", params.sort);
+  if (params.order) search.set("order", params.order);
+  if (params.created_gte?.trim()) search.set("created_gte", params.created_gte.trim());
+  if (params.created_lte?.trim()) search.set("created_lte", params.created_lte.trim());
+  if (params.correspondent?.trim()) search.set("correspondent", params.correspondent.trim());
+  if (params.document_type?.trim()) search.set("document_type", params.document_type.trim());
+  if (params.tag?.trim()) search.set("tag", params.tag.trim());
+  if (params.completeness && params.completeness !== "any") {
+    search.set("completeness", params.completeness);
+  }
+  if (params.relationship_type?.trim()) {
+    search.set("relationship_type", params.relationship_type.trim());
+  }
+  return search.toString();
+}
+
+export function fetchExplore(params: ExploreListParams = {}) {
+  const query = buildExploreQuery(params);
+  return apiFetch<ExplorePage>(`/ui/api/explore?${query}`);
+}
+
+export function fetchEntityTypes() {
+  return apiFetch<EntityTypeInfo[]>("/ui/api/entity-types");
 }
 
 /** Legacy helper: unclassified queue page. Prefer `fetchDocuments`. */

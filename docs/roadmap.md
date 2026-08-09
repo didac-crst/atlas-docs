@@ -34,7 +34,7 @@ Phases (summary):
 | --- | --- | --- |
 | A | Document experience: optional titles (no `atlasdocs:` UUID titles), inline preview | Done |
 | B | Semantic API: entity search, type registry, relationship constraints, completeness | Done |
-| C | Explore UI: nav, search/filters/sort/pagination, list/grid | |
+| C | Explore UI: nav, search/filters/sort/pagination, list/grid | Done |
 | D | Entity detail foundation and related context | |
 | E | Home launcher; move Reconcile/Disconnect out of primary nav; validation | |
 

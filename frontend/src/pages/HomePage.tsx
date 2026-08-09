@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FilePlus2, GitBranch, Tags } from "lucide-react";
+import { FilePlus2, GitBranch, Compass, Tags } from "lucide-react";
 import {
   ApiError,
   fetchHome,
@@ -69,6 +69,15 @@ export function HomePage({ session: _session }: Props) {
           <section className="home-section" aria-labelledby="home-tasks-title">
             <h2 id="home-tasks-title">Work areas</h2>
             <ul className="home-task-list">
+              <li>
+                <Link to="/explore" className="home-task-link">
+                  <Compass size={20} aria-hidden />
+                  <span>
+                    <strong>Explore</strong>
+                    <span className="meta">Browse documents and concepts.</span>
+                  </span>
+                </Link>
+              </li>
               <li>
                 <Link to="/classify?classification=unclassified" className="home-task-link">
                   <Tags size={20} aria-hidden />

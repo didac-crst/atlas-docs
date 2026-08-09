@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { ApiError, disconnect, getSession, type SessionInfo } from "./api/client";
 import { ConnectPage } from "./pages/ConnectPage";
+import { ExplorePage } from "./pages/ExplorePage";
 import { HomePage } from "./pages/HomePage";
 import { IngestPage } from "./pages/IngestPage";
 import { ReconcilePage } from "./pages/ReconcilePage";
@@ -86,6 +87,12 @@ export function App() {
                 Home
               </Link>
               <Link
+                to="/explore"
+                aria-current={path.startsWith("/explore") ? "page" : undefined}
+              >
+                Explore
+              </Link>
+              <Link
                 to="/classify"
                 aria-current={path.startsWith("/classify") || path.startsWith("/documents") ? "page" : undefined}
               >
@@ -148,6 +155,16 @@ export function App() {
             element={
               authenticated && session ? (
                 <IngestPage session={session} onSession={setSession} />
+              ) : (
+                <Navigate to="/connect" replace />
+              )
+            }
+          />
+          <Route
+            path="/explore"
+            element={
+              authenticated && session ? (
+                <ExplorePage session={session} />
               ) : (
                 <Navigate to="/connect" replace />
               )

@@ -45,6 +45,29 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   });
   await expect(page.getByText(password)).toHaveCount(0);
 
+  await page.getByRole("link", { name: /^Explore$/i }).first().click();
+  await expect(page.getByRole("heading", { name: /^Explore$/i })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /^Documents$/i })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.getByRole("button", { name: /^Grid$/i }).click();
+  await expect(page.getByRole("button", { name: /^Grid$/i })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByRole("tab", { name: /^People$/i }).click();
+  await expect(page.getByRole("tab", { name: /^People$/i })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.getByLabel(/^Search$/i).fill("Ali");
+  await page.getByRole("button", { name: /Apply filters/i }).click();
+  await expect(page.getByText(/Alice|No results for this Explore query/i).first()).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(page.getByText(password)).toHaveCount(0);
+
   await page.getByRole("link", { name: /^Classify$/i }).first().click();
   await expect(page.getByRole("heading", { name: /Needs classification|Classify|Documents/i })).toBeVisible();
 
