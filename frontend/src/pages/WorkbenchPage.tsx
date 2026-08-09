@@ -30,7 +30,7 @@ function parseClassification(value: string | null): ClassificationFilter {
 }
 
 function parseCompleteness(value: string | null): CompletenessFilter {
-  if (value === "empty" || value === "partial" || value === "complete" || value === "any") {
+  if (value === "empty" || value === "partial" || value === "classified" || value === "needs_review" || value === "complete" || value === "any") {
     return value;
   }
   return "any";

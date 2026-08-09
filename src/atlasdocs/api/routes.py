@@ -10,6 +10,10 @@ from atlasdocs.api.schemas import (
     CreateRelationshipRequest,
     DocumentResponse,
     EntityResponse,
+    EntitySearchHitResponse,
+    EntityTypeRegistryResponse,
+    ExplorePageResponse,
+    ExploreResultItemResponse,
     IngestionJobResponse,
     IngestionJobsResponse,
     ReconcileRequest,
@@ -129,6 +133,7 @@ def _serialize_document(document) -> DocumentResponse:
         document_type=document.document_type,
         open_url=document.open_url,
         relationships=[_serialize_relationship(item) for item in document.relationships],
+        semantic_completeness=getattr(document, "semantic_completeness", "empty") or "empty",
     )
 
 
@@ -144,6 +149,38 @@ def _serialize_entity(entity) -> EntityResponse:
         document_type=entity.document_type,
         open_url=entity.open_url,
         relationships=[_serialize_relationship(item) for item in (entity.relationships or [])],
+        display_type=getattr(entity, "display_type", None),
+        semantic_completeness=getattr(entity, "semantic_completeness", "empty") or "empty",
+    )
+
+
+def _serialize_explore_page(page) -> ExplorePageResponse:
+    return ExplorePageResponse(
+        items=[
+            ExploreResultItemResponse(
+                id=item.id,
+                label=item.label,
+                entity_type=item.entity_type,
+                semantic_completeness=item.semantic_completeness,
+                subtitle=item.subtitle,
+                paperless_document_id=item.paperless_document_id,
+                open_url=item.open_url,
+                preview_available=item.preview_available,
+                download_available=item.download_available,
+                relationship_summary=list(item.relationship_summary),
+                created_date=item.created_date,
+                correspondent=item.correspondent,
+                document_type=item.document_type,
+            )
+            for item in page.items
+        ],
+        page=page.page,
+        page_size=page.page_size,
+        mode=page.mode,
+        has_next=page.has_next,
+        has_previous=page.has_previous,
+        next_page=page.next_page,
+        total_hint=page.total_hint,
     )
 
 
@@ -230,6 +267,8 @@ def list_documents(
                 created_date=item.created_date,
                 correspondent=item.correspondent,
                 document_type=item.document_type,
+                semantic_completeness=getattr(item, "semantic_completeness", None),
+                entity_id=getattr(item, "entity_id", None),
             )
             for item in result.items
         ],
@@ -350,6 +389,39 @@ def create_relationship(
     return _serialize_document(document)
 
 
+@router.get("/entities/search", response_model=list[EntitySearchHitResponse])
+def search_entities(
+    authorization: str = Depends(require_authorization),
+    service: DocumentService = Depends(get_document_service),
+    q: str = Query(default=""),
+    entity_type: str | None = Query(default=None),
+    ontology: str | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=50),
+) -> list[EntitySearchHitResponse]:
+    try:
+        hits = service.search_entities(
+            authorization,
+            q=q,
+            entity_type=entity_type,
+            ontology_code=ontology,
+            limit=limit,
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return [
+        EntitySearchHitResponse(
+            id=item.id,
+            label=item.label,
+            entity_type=item.entity_type,
+            paperless_document_id=item.paperless_document_id,
+            subtitle=item.subtitle,
+            open_url=item.open_url,
+            semantic_completeness=item.semantic_completeness,
+        )
+        for item in hits
+    ]
+
+
 @router.get("/entities/{entity_id}", response_model=EntityResponse)
 def get_entity(
     entity_id: str,
@@ -432,9 +504,73 @@ def list_relationship_types(
             target_ontology=item.target_ontology,
             directionality=item.directionality,
             inverse=item.inverse,
+            source_entity_types=item.source_entity_types,
+            target_entity_types=item.target_entity_types,
         )
         for item in items
     ]
+
+
+@router.get("/entity-types", response_model=list[EntityTypeRegistryResponse])
+def list_entity_types(
+    authorization: str = Depends(require_authorization),
+    service: DocumentService = Depends(get_document_service),
+) -> list[EntityTypeRegistryResponse]:
+    try:
+        items = service.list_entity_type_registry(authorization)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return [
+        EntityTypeRegistryResponse(
+            code=item.code,
+            label=item.label,
+            icon=item.icon,
+            searchable=item.searchable,
+            valid_relationship_target=item.valid_relationship_target,
+            has_dedicated_page=item.has_dedicated_page,
+        )
+        for item in items
+    ]
+
+
+@router.get("/explore", response_model=ExplorePageResponse)
+def explore(
+    authorization: str = Depends(require_authorization),
+    service: DocumentService = Depends(get_document_service),
+    mode: str = Query(default="documents"),
+    page: int = Query(default=1, ge=1),
+    page_size: int | None = Query(default=None, ge=1, le=UNCLASSIFIED_PAGE_SIZE),
+    q: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc"),
+    created_gte: str | None = Query(default=None),
+    created_lte: str | None = Query(default=None),
+    correspondent: str | None = Query(default=None),
+    document_type: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    completeness: str | None = Query(default=None),
+    relationship_type: str | None = Query(default=None),
+) -> ExplorePageResponse:
+    try:
+        result = service.explore(
+            authorization,
+            mode=mode,
+            page=page,
+            page_size=page_size,
+            q=q,
+            sort=sort,
+            order=order,
+            created_gte=created_gte,
+            created_lte=created_lte,
+            correspondent=correspondent,
+            document_type=document_type,
+            tag=tag,
+            completeness=completeness,
+            relationship_type=relationship_type,
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _serialize_explore_page(result)
 
 
 @router.get("/ontologies/{ontology_code}/concepts", response_model=list[ConceptResponse])

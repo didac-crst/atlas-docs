@@ -43,7 +43,13 @@ export type QueuePage = {
 };
 
 export type ClassificationFilter = "unclassified" | "classified" | "any";
-export type CompletenessFilter = "empty" | "partial" | "complete" | "any";
+export type CompletenessFilter =
+  | "empty"
+  | "partial"
+  | "classified"
+  | "needs_review"
+  | "complete"
+  | "any";
 export type DocumentSort = "created" | "title" | "correspondent" | "added";
 export type SortOrder = "asc" | "desc";
 
@@ -69,6 +75,8 @@ export type RelationshipType = {
   target_ontology: string | null;
   directionality: string;
   inverse: string | null;
+  source_entity_types?: string[] | null;
+  target_entity_types?: string[] | null;
 };
 
 export type Concept = {
@@ -443,7 +451,7 @@ export async function retryIngestJob(jobId: string, csrfToken: string): Promise<
   });
 }
 
-/** Document-to-document relationship type codes. */
+/** @deprecated Prefer API `target_entity_types`; kept for older payloads. */
 export const DOCUMENT_TARGET_RELATIONSHIP_CODES = new Set([
   "derived-from",
   "has-derivative",
@@ -453,12 +461,20 @@ export const DOCUMENT_TARGET_RELATIONSHIP_CODES = new Set([
 
 export function relationshipTypesForTarget(
   types: RelationshipType[],
-  targetKind: "concept" | "document",
+  targetKind: string,
 ): RelationshipType[] {
-  if (targetKind === "document") {
-    return types.filter((item) => DOCUMENT_TARGET_RELATIONSHIP_CODES.has(item.code));
-  }
-  return types.filter((item) => !DOCUMENT_TARGET_RELATIONSHIP_CODES.has(item.code));
+  const wanted = targetKind.trim().toLowerCase();
+  return types.filter((item) => {
+    const targets = item.target_entity_types;
+    if (targets && targets.length > 0) {
+      return targets.map((code) => code.toLowerCase()).includes(wanted);
+    }
+    // Legacy fallback when seed constraints are absent.
+    if (wanted === "document") {
+      return DOCUMENT_TARGET_RELATIONSHIP_CODES.has(item.code);
+    }
+    return !DOCUMENT_TARGET_RELATIONSHIP_CODES.has(item.code);
+  });
 }
 
 export function formatCountStat(stat: CountStat): string {

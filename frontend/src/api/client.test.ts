@@ -93,15 +93,40 @@ describe("jobNeedsPolling", () => {
 
 describe("relationshipTypesForTarget", () => {
   const types = [
-    { code: "source-country", name: "Source Country", target_ontology: "country", directionality: "directed", inverse: null },
-    { code: "derived-from", name: "Derived From", target_ontology: null, directionality: "directed", inverse: "has-derivative" },
+    {
+      code: "source-country",
+      name: "Source Country",
+      target_ontology: "country",
+      directionality: "directed",
+      inverse: null,
+      target_entity_types: ["country"],
+    },
+    {
+      code: "derived-from",
+      name: "Derived From",
+      target_ontology: null,
+      directionality: "directed",
+      inverse: "has-derivative",
+      target_entity_types: ["document"],
+    },
+    {
+      code: "document-type",
+      name: "Document Type",
+      target_ontology: "document-type",
+      directionality: "directed",
+      inverse: null,
+      target_entity_types: ["concept"],
+    },
   ];
 
-  it("filters document vs concept relationship types", () => {
+  it("filters using target_entity_types from the API", () => {
     expect(relationshipTypesForTarget(types, "document").map((t) => t.code)).toEqual([
       "derived-from",
     ]);
     expect(relationshipTypesForTarget(types, "concept").map((t) => t.code)).toEqual([
+      "document-type",
+    ]);
+    expect(relationshipTypesForTarget(types, "country").map((t) => t.code)).toEqual([
       "source-country",
     ]);
   });

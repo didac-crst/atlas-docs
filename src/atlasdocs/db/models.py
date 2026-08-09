@@ -10,6 +10,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -120,6 +121,9 @@ class Entity(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     entity_type: Mapped[EntityType] = mapped_column(ENTITY_TYPE_ENUM, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    semantic_completeness: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="empty", server_default="empty"
+    )
 
     external_reference: Mapped[ExternalReference | None] = relationship(
         back_populates="entity", uselist=False
@@ -196,6 +200,8 @@ class RelationshipType(Base):
     inverse_relationship_type_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("relationship_types.id", ondelete="SET NULL"), nullable=True
     )
+    source_entity_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    target_entity_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     target_ontology: Mapped[Ontology | None] = relationship()
     inverse_relationship_type: Mapped[RelationshipType | None] = relationship(

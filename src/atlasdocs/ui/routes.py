@@ -31,6 +31,9 @@ from atlasdocs.api.schemas import (
     CreateRelationshipRequest,
     DocumentResponse,
     EntitySearchHitResponse,
+    EntityTypeRegistryResponse,
+    ExplorePageResponse,
+    ExploreResultItemResponse,
     HomeSummaryResponse,
     CountStatResponse,
     RecentDocumentResponse,
@@ -204,6 +207,37 @@ def _serialize_document(document) -> DocumentResponse:
         document_type=document.document_type,
         open_url=document.open_url,
         relationships=[_serialize_relationship(item) for item in document.relationships],
+        semantic_completeness=getattr(document, "semantic_completeness", "empty") or "empty",
+    )
+
+
+def _serialize_explore_page(page) -> ExplorePageResponse:
+    return ExplorePageResponse(
+        items=[
+            ExploreResultItemResponse(
+                id=item.id,
+                label=item.label,
+                entity_type=item.entity_type,
+                semantic_completeness=item.semantic_completeness,
+                subtitle=item.subtitle,
+                paperless_document_id=item.paperless_document_id,
+                open_url=item.open_url,
+                preview_available=item.preview_available,
+                download_available=item.download_available,
+                relationship_summary=list(item.relationship_summary),
+                created_date=item.created_date,
+                correspondent=item.correspondent,
+                document_type=item.document_type,
+            )
+            for item in page.items
+        ],
+        page=page.page,
+        page_size=page.page_size,
+        mode=page.mode,
+        has_next=page.has_next,
+        has_previous=page.has_previous,
+        next_page=page.next_page,
+        total_hint=page.total_hint,
     )
 
 
@@ -416,8 +450,78 @@ def search_entities(
             paperless_document_id=item.paperless_document_id,
             subtitle=item.subtitle,
             open_url=item.open_url,
+            semantic_completeness=item.semantic_completeness,
         )
         for item in hits
+    ]
+    response = JSONResponse(content=[item.model_dump() for item in payload])
+    set_session_cookie(response, ui_session)
+    return response
+
+
+@api_router.get("/explore", response_model=ExplorePageResponse)
+def explore(
+    request: Request,
+    mode: str = Query(default="documents"),
+    page: int = Query(default=1, ge=1),
+    page_size: int | None = Query(default=None, ge=1, le=UNCLASSIFIED_PAGE_SIZE),
+    q: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc"),
+    created_gte: str | None = Query(default=None),
+    created_lte: str | None = Query(default=None),
+    correspondent: str | None = Query(default=None),
+    document_type: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    completeness: str | None = Query(default=None),
+    relationship_type: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    try:
+        result = service.explore(
+            auth,
+            mode=mode,
+            page=page,
+            page_size=page_size,
+            q=q,
+            sort=sort,
+            order=order,
+            created_gte=created_gte,
+            created_lte=created_lte,
+            correspondent=correspondent,
+            document_type=document_type,
+            tag=tag,
+            completeness=completeness,
+            relationship_type=relationship_type,
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_explore_page(result), ui_session)
+
+
+@api_router.get("/entity-types", response_model=list[EntityTypeRegistryResponse])
+def list_entity_types(
+    request: Request,
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    try:
+        rows = service.list_entity_type_registry(auth)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    payload = [
+        EntityTypeRegistryResponse(
+            code=item.code,
+            label=item.label,
+            icon=item.icon,
+            searchable=item.searchable,
+            valid_relationship_target=item.valid_relationship_target,
+            has_dedicated_page=item.has_dedicated_page,
+        )
+        for item in rows
     ]
     response = JSONResponse(content=[item.model_dump() for item in payload])
     set_session_cookie(response, ui_session)
@@ -477,6 +581,8 @@ def list_documents(
                 created_date=item.created_date,
                 correspondent=item.correspondent,
                 document_type=item.document_type,
+                semantic_completeness=getattr(item, "semantic_completeness", None),
+                entity_id=getattr(item, "entity_id", None),
             )
             for item in result.items
         ],
@@ -632,6 +738,8 @@ def list_relationship_types(
             target_ontology=item.target_ontology,
             directionality=item.directionality,
             inverse=item.inverse,
+            source_entity_types=item.source_entity_types,
+            target_entity_types=item.target_entity_types,
         )
         for item in rows
     ]

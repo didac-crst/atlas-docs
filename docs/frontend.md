@@ -82,7 +82,9 @@ header. The SPA does not send the Paperless token to those paths.
 | GET | `/ui/api/documents/{id}` | Document detail + relationships |
 | POST | `/ui/api/documents/{id}/relationships` | Add relationship (prefer `target_entity_id`) |
 | DELETE | `/ui/api/relationships/{id}` | Remove relationship |
-| GET | `/ui/api/relationship-types` | Typed relationship catalog |
+| GET | `/ui/api/relationship-types` | Typed relationship catalog (source/target entity types) |
+| GET | `/ui/api/entity-types` | Entity type registry |
+| GET | `/ui/api/explore` | Entity-oriented Explore results |
 | GET | `/ui/api/entities/search` | Atlas entity autocomplete (`q`, `entity_type`, `ontology`) |
 | GET | `/ui/api/concepts` | Concept autocomplete (`q`, `ontology`) |
 | POST | `/ui/api/ingest` | Multipart upload → durable job |

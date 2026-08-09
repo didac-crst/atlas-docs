@@ -29,50 +29,81 @@ ontologies:
         name: Acme
       - code: contoso
         name: Contoso
+  - code: case
+    name: Case
+    concepts:
+      - code: sample-case
+        name: Sample Case
 
 relationship_types:
   - code: source-country
     name: Source Country
     target_ontology: country
     directionality: directed
+    source_entity_types: [document]
+    target_entity_types: [country]
   - code: document-type
     name: Document Type
     target_ontology: document-type
     directionality: directed
+    source_entity_types: [document]
+    target_entity_types: [concept]
   - code: concerns
     name: Concerns
-    # Any concept; resolved by name/code across ontologies.
+    # Person or Organization (registry-constrained; no single ontology).
     target_ontology: null
     directionality: directed
+    source_entity_types: [document]
+    target_entity_types: [person, organization]
   - code: issued-by
     name: Issued By
     target_ontology: organization
     directionality: directed
+    source_entity_types: [document]
+    target_entity_types: [organization]
   - code: concerns-person
     name: Concerns Person
     target_ontology: person
     directionality: directed
+    source_entity_types: [document]
+    target_entity_types: [person]
+  - code: belongs-to
+    name: Belongs To
+    target_ontology: case
+    directionality: directed
+    source_entity_types: [document]
+    target_entity_types: [case]
   - code: related-to
     name: Related To
     target_ontology: null
     directionality: symmetric
+    source_entity_types: [document, concept, person, organization, country, case]
+    target_entity_types: [document, concept, person, organization, country, case]
   - code: derived-from
     name: Derived From
     target_ontology: null
     directionality: directed
     inverse: has-derivative
+    source_entity_types: [document]
+    target_entity_types: [document]
   - code: has-derivative
     name: Has Derivative
     target_ontology: null
     directionality: directed
     inverse: derived-from
+    source_entity_types: [document]
+    target_entity_types: [document]
   - code: replies-to
     name: Replies To
     target_ontology: null
     directionality: directed
     inverse: answered-by
+    source_entity_types: [document]
+    target_entity_types: [document]
   - code: answered-by
     name: Answered By
     target_ontology: null
     directionality: directed
     inverse: replies-to
+    source_entity_types: [document]
+    target_entity_types: [document]

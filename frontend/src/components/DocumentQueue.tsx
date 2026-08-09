@@ -249,7 +249,9 @@ export function DocumentQueue({
             <option value="any">Any</option>
             <option value="empty">Empty</option>
             <option value="partial">Partial</option>
-            <option value="complete">Complete</option>
+            <option value="classified">Classified</option>
+            <option value="needs_review">Needs review</option>
+            <option value="complete">Complete (legacy)</option>
           </select>
         </div>
         <div className="field">

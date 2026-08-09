@@ -26,18 +26,21 @@ Router: `src/atlasdocs/api/routes.py`.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/health` | Liveness |
-| GET | `/documents` | List with `unclassified=true` and/or `classification`, `q`, `sort`, `order`, `page` |
+| GET | `/documents` | List with `unclassified=true` and/or `classification`, `q`, `sort`, `order`, `page`, `completeness` |
 | POST | `/documents/bulk-relationships` | Bulk assign (per-doc Paperless authz) |
 | GET | `/documents/{paperless_document_id}` | Document facade + relationships |
 | POST | `/documents/{paperless_document_id}/relationships` | Add relationship (document facade) |
 | POST | `/ingest` | Multipart upload → durable job |
 | GET | `/ingest/jobs` | Jobs for the calling token fingerprint |
 | GET | `/ingest/jobs/{job_id}` | Job status |
+| GET | `/explore` | Entity-oriented Explore page (`mode`, filters, sort, pagination) |
+| GET | `/entity-types` | Entity type registry (display metadata) |
+| GET | `/entities/search` | Entity search / autocomplete |
 | GET | `/entities/{entity_id}` | Entity detail + outgoing relationships |
 | GET | `/entities/{entity_id}/relationships` | Outgoing relationships |
 | POST | `/entities/{entity_id}/relationships` | Create edge |
 | DELETE | `/relationships/{relationship_id}` | Delete edge (+ companions) |
-| GET | `/relationship-types` | Relationship type catalog |
+| GET | `/relationship-types` | Relationship type catalog (incl. source/target entity types) |
 | GET | `/ontologies/{ontology_code}/concepts` | Concepts in an ontology |
 | POST | `/reconcile` | Reconciliation (`dry_run`, optional `limit`) |
 
