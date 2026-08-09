@@ -16,9 +16,15 @@ Reconciliation:
    were **not** seen in the listing and reports missing (404) or inaccessible
    (401/403) ids.
 5. **Never deletes** relationships, entities, or external references.
+6. Skips **tombstoned** entities (`deleted_at` set) when classifying
+   `missing_in_paperless`, so intentional AtlasDocs deletes are not reported as
+   orphans.
 
 Limited runs (`limit` set) focus on create/scan; orphan verification is deferred
 to a full pass.
+
+Intentional delete/replace flows are documented in
+[document-lifecycle.md](document-lifecycle.md).
 
 ## Safety rule
 

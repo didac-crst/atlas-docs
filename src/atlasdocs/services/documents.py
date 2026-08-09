@@ -12,6 +12,7 @@ from atlasdocs.config import UNCLASSIFIED_MAX_UPSTREAM_PAGES, UNCLASSIFIED_PAGE_
 from atlasdocs.db.models import (
     EXTERNAL_SYSTEM_PAPERLESS,
     Concept,
+    DocumentReplacementHistory,
     Entity,
     EntityType,
     ExternalReference,
@@ -21,6 +22,7 @@ from atlasdocs.db.models import (
     RelationshipOrigin,
     RelationshipStatus,
     RelationshipType,
+    utcnow,
 )
 from atlasdocs.services.completeness import CompletenessInput, calculate_completeness
 from atlasdocs.services.entity_types import (
@@ -295,6 +297,10 @@ class DocumentService:
     def _get_or_create_document_entity(self, paperless_document_id: int) -> Entity:
         existing = self._get_external_reference(paperless_document_id)
         if existing is not None:
+            if existing.entity is not None and existing.entity.deleted_at is not None:
+                raise ConflictError(
+                    "Paperless document is bound to a deleted AtlasDocs entity"
+                )
             return existing.entity
 
         try:
@@ -312,11 +318,16 @@ class DocumentService:
                 )
                 self._session.add(reference)
                 self._session.flush()
+                self._recalculate_completeness(entity)
                 return entity
         except IntegrityError:
             existing = self._get_external_reference(paperless_document_id)
             if existing is None:
                 raise
+            if existing.entity is not None and existing.entity.deleted_at is not None:
+                raise ConflictError(
+                    "Paperless document is bound to a deleted AtlasDocs entity"
+                )
             return existing.entity
 
     def _load_entity(self, entity_id: uuid.UUID) -> Entity:
@@ -341,7 +352,12 @@ class DocumentService:
         except ValueError:
             return None
 
+    def _reject_if_deleted(self, entity: Entity | None) -> None:
+        if entity is not None and entity.deleted_at is not None:
+            raise NotFoundError("Entity not found")
+
     def _ensure_entity_readable(self, entity: Entity, token: str) -> PaperlessDocument | None:
+        self._reject_if_deleted(entity)
         reference = entity.external_reference
         if reference is None or reference.system != EXTERNAL_SYSTEM_PAPERLESS:
             # Concept/native entities are not Paperless-backed; still require a
@@ -451,6 +467,8 @@ class DocumentService:
         ).unique()
         by_id: dict[int, str] = {}
         for ref in rows:
+            if ref.entity is None or ref.entity.deleted_at is not None:
+                continue
             try:
                 doc_id = int(ref.external_id)
             except ValueError:
@@ -494,6 +512,8 @@ class DocumentService:
         )
         for rel in incoming:
             source = rel.source_entity
+            if source is None or source.deleted_at is not None:
+                continue
             try:
                 paperless_doc = self._ensure_entity_readable(source, token)
             except (ForbiddenDocumentError, NotFoundError):
@@ -564,6 +584,7 @@ class DocumentService:
                 ExternalReference.system == EXTERNAL_SYSTEM_PAPERLESS,
                 ExternalReference.external_id.in_(external_ids),
                 Relationship.status == RelationshipStatus.confirmed,
+                Entity.deleted_at.is_(None),
             )
             .distinct()
         )
@@ -805,6 +826,7 @@ class DocumentService:
         ).unique().one_or_none()
         if entity is None:
             raise NotFoundError("Entity not found")
+        self._reject_if_deleted(entity)
 
         paperless_doc = self._ensure_entity_readable(entity, auth)
         paperless_id = self._paperless_id_for_entity(entity)
@@ -906,6 +928,7 @@ class DocumentService:
             )
         ).unique().one_or_none()
         entity = reference.entity if reference else None
+        self._reject_if_deleted(entity)
         return DocumentSemantics(
             paperless_document_id=paperless_document_id,
             entity_id=str(entity.id) if entity else "",
@@ -919,6 +942,127 @@ class DocumentService:
                 entity.semantic_completeness if entity is not None else "empty"
             ),
         )
+
+    def delete_document(
+        self,
+        paperless_document_id: int,
+        token: str | None = None,
+        *,
+        confirm: bool = False,
+        actor_label: str | None = None,
+    ) -> None:
+        """Delete the Paperless original, then tombstone the AtlasDocs entity."""
+        if not confirm:
+            raise ValidationError("Deletion requires explicit confirmation")
+        auth = self._require_token(token)
+        reference = self._session.scalars(
+            select(ExternalReference)
+            .options(joinedload(ExternalReference.entity))
+            .where(
+                ExternalReference.system == EXTERNAL_SYSTEM_PAPERLESS,
+                ExternalReference.external_id
+                == self._paperless_external_id(paperless_document_id),
+            )
+        ).unique().one_or_none()
+        if reference is not None:
+            self._reject_if_deleted(reference.entity)
+
+        try:
+            self._ensure_paperless_access(paperless_document_id, auth)
+        except PaperlessAuthError as exc:
+            raise ForbiddenDocumentError(str(exc)) from exc
+        except PaperlessNotFoundError as exc:
+            raise NotFoundError(str(exc)) from exc
+
+        try:
+            self._paperless.delete_document(paperless_document_id, auth)
+        except PaperlessAuthError as exc:
+            raise ForbiddenDocumentError(str(exc)) from exc
+        except PaperlessNotFoundError:
+            pass
+        except PaperlessUnavailableError as exc:
+            raise UpstreamError(str(exc)) from exc
+        except PaperlessError as exc:
+            raise UpstreamError(str(exc)) from exc
+
+        if reference is None or reference.entity is None:
+            return
+
+        entity = reference.entity
+        entity.deleted_at = utcnow()
+        entity.deleted_by_label = actor_label[:255] if actor_label else None
+        self._recalculate_completeness(entity)
+
+    def complete_replacement(
+        self,
+        entity_id: uuid.UUID,
+        new_paperless_document_id: int,
+        token: str,
+        *,
+        previous_checksum: str | None = None,
+        new_checksum: str | None = None,
+        actor_label: str | None = None,
+        reason: str | None = None,
+    ) -> Entity:
+        """Switch external reference after the replacement document is validated."""
+        entity = self._load_entity(entity_id)
+        self._reject_if_deleted(entity)
+        if entity.entity_type != EntityType.document:
+            raise ValidationError("Only document entities can be replaced")
+        ref = entity.external_reference
+        if ref is None or ref.system != EXTERNAL_SYSTEM_PAPERLESS:
+            raise ValidationError("Entity has no Paperless external reference")
+
+        try:
+            self._paperless.assert_accessible(new_paperless_document_id, token)
+        except PaperlessAuthError as exc:
+            raise ForbiddenDocumentError(str(exc)) from exc
+        except PaperlessNotFoundError as exc:
+            raise NotFoundError(str(exc)) from exc
+        except PaperlessUnavailableError as exc:
+            raise UpstreamError(str(exc)) from exc
+
+        previous_external_id = ref.external_id
+        new_external_id = self._paperless_external_id(new_paperless_document_id)
+        try:
+            old_paperless_id = int(previous_external_id)
+        except ValueError as exc:
+            raise ValidationError("Invalid Paperless external reference") from exc
+
+        if previous_external_id == new_external_id:
+            self._recalculate_completeness(entity)
+            return entity
+
+        existing = self._get_external_reference(new_paperless_document_id)
+        if existing is not None and existing.entity_id != entity.id:
+            raise ConflictError("Replacement document is already bound to another entity")
+
+        ref.external_id = new_external_id
+        history = DocumentReplacementHistory(
+            entity_id=entity.id,
+            previous_external_id=previous_external_id,
+            new_external_id=new_external_id,
+            previous_checksum=previous_checksum,
+            new_checksum=new_checksum,
+            actor_label=(actor_label[:255] if actor_label else None),
+            reason=(reason.strip()[:512] if reason and reason.strip() else None),
+        )
+        self._session.add(history)
+        self._session.flush()
+
+        try:
+            self._paperless.delete_document(old_paperless_id, token)
+        except PaperlessNotFoundError:
+            pass
+        except PaperlessAuthError as exc:
+            raise ForbiddenDocumentError(str(exc)) from exc
+        except PaperlessUnavailableError as exc:
+            raise UpstreamError(str(exc)) from exc
+        except PaperlessError as exc:
+            raise UpstreamError(str(exc)) from exc
+
+        self._recalculate_completeness(entity)
+        return entity
 
     def list_unclassified(
         self,
@@ -1205,7 +1349,7 @@ class DocumentService:
             query = select(Concept).options(
                 joinedload(Concept.ontology),
                 joinedload(Concept.entity),
-            )
+            ).join(Entity, Entity.id == Concept.id).where(Entity.deleted_at.is_(None))
             resolved_ontology = ontology_code
             if wanted in {"person", "organization", "country", "case"}:
                 resolved_ontology = ontology_for_registry_code(wanted)
@@ -1822,11 +1966,14 @@ class DocumentService:
         concepts.sort(key=lambda item: item.name)
         return [ConceptView(code=item.code, name=item.name) for item in concepts]
 
-    def list_paperless_external_references(self) -> list[ExternalReference]:
-        return list(
-            self._session.scalars(
-                select(ExternalReference).where(
-                    ExternalReference.system == EXTERNAL_SYSTEM_PAPERLESS
-                )
-            )
+    def list_paperless_external_references(self, *, include_deleted: bool = False) -> list[ExternalReference]:
+        query = (
+            select(ExternalReference)
+            .options(joinedload(ExternalReference.entity))
+            .where(ExternalReference.system == EXTERNAL_SYSTEM_PAPERLESS)
         )
+        if not include_deleted:
+            query = query.join(Entity, Entity.id == ExternalReference.entity_id).where(
+                Entity.deleted_at.is_(None)
+            )
+        return list(self._session.scalars(query).unique())

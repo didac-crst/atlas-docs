@@ -149,6 +149,8 @@ class HomeService:
         accessible = 0
         try:
             for rel in rows:
+                if rel.source_entity is not None and rel.source_entity.deleted_at is not None:
+                    continue
                 ref = rel.source_entity.external_reference if rel.source_entity else None
                 if ref is None or ref.system != EXTERNAL_SYSTEM_PAPERLESS:
                     continue

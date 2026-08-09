@@ -9,6 +9,7 @@ from atlasdocs.api.schemas import (
     ConceptResponse,
     CreateDocumentRelationshipRequest,
     CreateRelationshipRequest,
+    DeleteDocumentRequest,
     DocumentResponse,
     EntityResponse,
     EntitySearchHitResponse,
@@ -355,6 +356,34 @@ def ingest_document(
     return _serialize_job(job)
 
 
+@router.post(
+    "/documents/{paperless_document_id}/replace",
+    response_model=IngestionJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def replace_document(
+    paperless_document_id: int,
+    document: UploadFile = File(...),
+    title: str | None = Form(default=None),
+    reason: str | None = Form(default=None),
+    authorization: str = Depends(require_authorization),
+    service: IngestionService = Depends(get_ingest_service),
+) -> IngestionJobResponse:
+    try:
+        job = service.enqueue_replace(
+            authorization=authorization,
+            paperless_document_id=paperless_document_id,
+            filename=document.filename or "upload.bin",
+            file_obj=document.file,
+            content_type=document.content_type or "application/octet-stream",
+            title=title,
+            reason=reason,
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _serialize_job(job)
+
+
 @router.get("/ingest/jobs", response_model=IngestionJobsResponse)
 def list_ingest_jobs(
     authorization: str = Depends(require_authorization),
@@ -388,6 +417,23 @@ def get_document(
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
     return _serialize_document(document)
+
+
+@router.delete("/documents/{paperless_document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document(
+    paperless_document_id: int,
+    payload: DeleteDocumentRequest,
+    authorization: str = Depends(require_authorization),
+    service: DocumentService = Depends(get_document_service),
+) -> None:
+    try:
+        service.delete_document(
+            paperless_document_id,
+            token=authorization,
+            confirm=payload.confirm,
+        )
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
 
 
 @router.post(

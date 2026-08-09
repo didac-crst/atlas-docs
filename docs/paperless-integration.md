@@ -57,10 +57,13 @@ calls so arbitrary strings cannot bypass auth.
 `atlasdocs.services.paperless.PaperlessClient` is a thin HTTP adapter:
 
 - `exchange_password` / `get_document` / `list_documents` / `post_document` /
-  `get_task` / `stream_document_file` /
+  `delete_document` / `get_task` / `stream_document_file` /
   `assert_accessible` / `validate_token`
 - Resolves correspondent and document-type labels from nested objects or
   integer ids (cached secondary lookups)
+
+Document delete and failure-safe replace (same Atlas UUID, switched Paperless
+id) are described in [document-lifecycle.md](document-lifecycle.md).
 
 ## Ingestion
 

@@ -300,6 +300,29 @@ textarea {
   margin-bottom: var(--space-5);
 }
 
+.doc-replace-panel {
+  margin-top: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.doc-replace-panel .field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.doc-replace-panel input[type="text"] {
+  min-height: var(--touch);
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
 .doc-title {
   margin: 0;
   font-size: clamp(1.35rem, 2vw, 1.75rem);

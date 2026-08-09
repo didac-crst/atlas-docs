@@ -66,7 +66,7 @@ header. The SPA does not send the Paperless token to those paths.
 | `/ui/entities/:id` | Entity detail (concepts/people/orgs; documents redirect) |
 | `/ui/classify` | Searchable classification workbench + bulk assign |
 | `/ui/ingest` | Upload + ingestion job list |
-| `/ui/documents/:id` | Document detail + composer |
+| `/ui/documents/:id` | Document detail + composer (Preview / Download / Replace / Delete / Open in Paperless) |
 | `/ui/reconcile` | Reconciliation (account menu; not primary nav) |
 | `/ui/connect` | Login / account |
 
@@ -85,6 +85,8 @@ Disconnect live under the account menu.
 | GET | `/ui/api/documents` | List with `q`, `classification`, `sort`, `order`, `page` |
 | POST | `/ui/api/documents/bulk-relationships` | Bulk assign (per-doc authz) |
 | GET | `/ui/api/documents/{id}` | Document detail + relationships |
+| DELETE | `/ui/api/documents/{id}` | Delete Paperless original + tombstone (`confirm` + CSRF) |
+| POST | `/ui/api/documents/{id}/replace` | Failure-safe replace upload (async job) |
 | POST | `/ui/api/documents/{id}/relationships` | Add relationship (prefer `target_entity_id`) |
 | DELETE | `/ui/api/relationships/{id}` | Remove relationship |
 | GET | `/ui/api/relationship-types` | Typed relationship catalog (source/target entity types) |

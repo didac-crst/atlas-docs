@@ -12,6 +12,9 @@ Canonical description of the current semantic layer (post-v0.4).
 AtlasDocs never embeds a document viewer, never touches Paperless databases or
 filesystems, and integrates only through the Paperless **REST API**.
 
+Document create / replace / delete / tombstone behavior:
+[document-lifecycle.md](document-lifecycle.md) (migration `0008_document_lifecycle`).
+
 See [paperless-integration.md](paperless-integration.md) for authorization and
 URL rules.
 

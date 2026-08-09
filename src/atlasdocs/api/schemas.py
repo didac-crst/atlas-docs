@@ -234,3 +234,7 @@ class ReconcileResponse(BaseModel):
     inaccessible_in_paperless: list[int]
     errors: list[str]
     human_summary: str
+
+
+class DeleteDocumentRequest(BaseModel):
+    confirm: bool = False

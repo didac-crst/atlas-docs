@@ -1,10 +1,26 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   documentContextLine,
   documentDisplayTitle,
   SemanticDocumentDetail,
 } from "./SemanticDocumentDetail";
+
+vi.mock("../api/client", async () => {
+  const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
+  return {
+    ...actual,
+    deleteDocument: vi.fn(),
+    removeRelationship: vi.fn(),
+    fetchDocument: vi.fn(),
+    replaceDocument: vi.fn(),
+    fetchIngestJob: vi.fn(),
+  };
+});
+
+import { deleteDocument } from "../api/client";
 
 const baseDoc = {
   paperless_document_id: 184,
@@ -72,14 +88,20 @@ describe("SemanticDocumentDetail helpers", () => {
 });
 
 describe("SemanticDocumentDetail document actions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("renders inline preview, download, and advanced Paperless actions", () => {
     render(
-      <SemanticDocumentDetail
-        document={{ ...baseDoc, open_url: "https://docs.example.test/documents/184/" }}
-        csrfToken="csrf"
-        onRemoved={vi.fn()}
-        onError={vi.fn()}
-      />,
+      <MemoryRouter>
+        <SemanticDocumentDetail
+          document={{ ...baseDoc, open_url: "https://docs.example.test/documents/184/" }}
+          csrfToken="csrf"
+          onRemoved={vi.fn()}
+          onError={vi.fn()}
+        />
+      </MemoryRouter>,
     );
     const frame = document.querySelector("iframe.doc-preview-frame");
     expect(frame).not.toBeNull();
@@ -99,16 +121,20 @@ describe("SemanticDocumentDetail document actions", () => {
     expect(screen.getByText("Payslip · Acme Payroll · 2024")).toBeInTheDocument();
     expect(screen.getByText(/Technical details/i)).toBeInTheDocument();
     expect(screen.queryByText(/^Document 184$/)).toBeNull();
+    expect(screen.getByRole("button", { name: /^Replace document$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Delete document$/i })).toBeInTheDocument();
   });
 
   it("disables Paperless action when open_url is missing", () => {
     render(
-      <SemanticDocumentDetail
-        document={{ ...baseDoc, open_url: null }}
-        csrfToken="csrf"
-        onRemoved={vi.fn()}
-        onError={vi.fn()}
-      />,
+      <MemoryRouter>
+        <SemanticDocumentDetail
+          document={{ ...baseDoc, open_url: null }}
+          csrfToken="csrf"
+          onRemoved={vi.fn()}
+          onError={vi.fn()}
+        />
+      </MemoryRouter>,
     );
     const button = screen.getByRole("button", { name: /Open original in Paperless/i });
     expect(button).toBeDisabled();
@@ -119,15 +145,44 @@ describe("SemanticDocumentDetail document actions", () => {
 
   it("keeps Paperless id in collapsed technical details only", () => {
     render(
-      <SemanticDocumentDetail
-        document={{ ...baseDoc, title: null, open_url: null }}
-        csrfToken="csrf"
-        onRemoved={vi.fn()}
-        onError={vi.fn()}
-      />,
+      <MemoryRouter>
+        <SemanticDocumentDetail
+          document={{ ...baseDoc, title: null, open_url: null }}
+          csrfToken="csrf"
+          onRemoved={vi.fn()}
+          onError={vi.fn()}
+        />
+      </MemoryRouter>,
     );
     expect(screen.getByRole("heading", { name: "Untitled document" })).toBeInTheDocument();
     expect(screen.getByText("184")).toBeInTheDocument();
     expect(screen.getByText("entity-1")).toBeInTheDocument();
+  });
+
+  it("requires confirmation before deleting a document", async () => {
+    const user = userEvent.setup();
+    const onDocumentDeleted = vi.fn(async () => undefined);
+    vi.mocked(deleteDocument).mockResolvedValue(undefined as never);
+
+    render(
+      <MemoryRouter>
+        <SemanticDocumentDetail
+          document={{ ...baseDoc, open_url: null }}
+          csrfToken="csrf"
+          onRemoved={vi.fn()}
+          onDocumentDeleted={onDocumentDeleted}
+          onError={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /^Delete document$/i }));
+    expect(deleteDocument).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/original file will be deleted from Paperless/i),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Confirm delete$/i }));
+    expect(deleteDocument).toHaveBeenCalledWith(184, "csrf", { confirm: true });
+    expect(onDocumentDeleted).toHaveBeenCalled();
   });
 });

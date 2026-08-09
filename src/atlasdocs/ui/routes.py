@@ -28,6 +28,7 @@ from atlasdocs.api.schemas import (
     BulkRelationshipsResponse,
     ConceptResponse,
     CreateRelationshipRequest,
+    DeleteDocumentRequest,
     DocumentResponse,
     EntityResponse,
     EntitySearchHitResponse,
@@ -871,6 +872,73 @@ def retry_ingest_job(
     return _json_with_session(_serialize_job(job), ui_session)
 
 
+@api_router.delete("/documents/{paperless_document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_ui_document(
+    request: Request,
+    paperless_document_id: int,
+    payload: DeleteDocumentRequest,
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> Response:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        service.delete_document(
+            paperless_document_id,
+            token=auth,
+            confirm=payload.confirm,
+            actor_label=ui_session.username_label,
+        )
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    set_session_cookie(response, ui_session)
+    return response
+
+
+@api_router.post(
+    "/documents/{paperless_document_id}/replace",
+    response_model=IngestionJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def replace_ui_document(
+    request: Request,
+    paperless_document_id: int,
+    document: UploadFile = File(...),
+    title: str | None = Form(default=None),
+    reason: str | None = Form(default=None),
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: IngestionService = Depends(get_ui_ingest_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        job = service.enqueue_replace(
+            authorization=auth,
+            paperless_document_id=paperless_document_id,
+            filename=document.filename or "upload.bin",
+            file_obj=document.file,
+            content_type=document.content_type or "application/octet-stream",
+            title=title,
+            reason=reason,
+            session_id=ui_session.id,
+            created_by_label=ui_session.username_label,
+        )
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_job(job), ui_session, status_code=202)
+
+
 def _safe_download_filename(name: str | None, fallback: str) -> str:
     base = (name or fallback).replace('"', "").replace("\n", " ").replace("\r", " ").strip()
     base = base.split("/")[-1].split("\\")[-1] or fallback
@@ -893,7 +961,12 @@ def _stream_paperless_document(
     paperless_document_id: int,
     kind: str,
     disposition: str,
+    documents: DocumentService | None = None,
 ) -> StreamingResponse:
+    if documents is not None:
+        reference = documents.get_external_reference(paperless_document_id)
+        if reference is not None and reference.entity is not None and reference.entity.deleted_at is not None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     try:
         # Authz probe first so we never leak existence via stream errors.
         paperless.assert_accessible(paperless_document_id, auth)
@@ -938,6 +1011,7 @@ def preview_document(
     paperless_document_id: int,
     db: Session = Depends(get_db),
     paperless: PaperlessClient = Depends(get_paperless_client),
+    service: DocumentService = Depends(get_ui_service),
 ) -> StreamingResponse:
     _ui_session, auth = _require_ui_auth(request, db)
     return _stream_paperless_document(
@@ -946,6 +1020,7 @@ def preview_document(
         paperless_document_id=paperless_document_id,
         kind="preview",
         disposition="inline",
+        documents=service,
     )
 
 
@@ -955,6 +1030,7 @@ def download_document(
     paperless_document_id: int,
     db: Session = Depends(get_db),
     paperless: PaperlessClient = Depends(get_paperless_client),
+    service: DocumentService = Depends(get_ui_service),
 ) -> StreamingResponse:
     _ui_session, auth = _require_ui_auth(request, db)
     return _stream_paperless_document(
@@ -963,6 +1039,7 @@ def download_document(
         paperless_document_id=paperless_document_id,
         kind="download",
         disposition="attachment",
+        documents=service,
     )
 
 

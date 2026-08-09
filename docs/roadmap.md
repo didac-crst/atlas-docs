@@ -40,7 +40,7 @@ Phases (summary):
 
 Also in scope for v0.6: document delete/replace via Paperless (failure-safe),
 and creation-time semantic completeness states (`empty` / `partial` /
-`classified` / `needs_review`).
+`classified` / `needs_review`) — see [document-lifecycle.md](document-lifecycle.md).
 
 ## Explicitly deferred
 

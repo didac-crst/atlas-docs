@@ -510,6 +510,43 @@ export function removeRelationship(relationshipId: string, csrfToken: string) {
   );
 }
 
+export function deleteDocument(
+  paperlessId: number,
+  csrfToken: string,
+  options: { confirm?: boolean } = {},
+) {
+  const confirm = options.confirm ?? true;
+  return apiFetch<void>(
+    `/ui/api/documents/${paperlessId}`,
+    { method: "DELETE", body: JSON.stringify({ confirm }) },
+    csrfToken,
+  );
+}
+
+export function replaceDocument(
+  paperlessId: number,
+  file: File,
+  csrfToken: string,
+  options: { title?: string; reason?: string } = {},
+) {
+  const form = new FormData();
+  form.append("document", file);
+  if (options.title?.trim()) {
+    form.append("title", options.title.trim());
+  }
+  if (options.reason?.trim()) {
+    form.append("reason", options.reason.trim());
+  }
+  return apiFetch<IngestJob>(
+    `/ui/api/documents/${paperlessId}/replace`,
+    {
+      method: "POST",
+      body: form,
+    },
+    csrfToken,
+  );
+}
+
 export function ingestDocument(file: File, title: string | undefined, csrfToken: string) {
   const form = new FormData();
   form.append("document", file);

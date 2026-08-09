@@ -251,6 +251,20 @@ export function WorkbenchPage({ session, onSession }: Props) {
                 await refreshCsrf();
                 setQueue(await reloadQueue());
               }}
+              onReplaced={async (nextDoc, message) => {
+                setDocument(nextDoc);
+                setNotice(message);
+                await refreshCsrf();
+                setQueue(await reloadQueue());
+                navigate(`/documents/${nextDoc.paperless_document_id}${listSearchString()}`);
+              }}
+              onDocumentDeleted={async () => {
+                setNotice("Document deleted");
+                await refreshCsrf();
+                setDocument(null);
+                setQueue(await reloadQueue());
+                navigate(`/classify${listSearchString()}`);
+              }}
               onError={setError}
             />
             <RelationshipComposer

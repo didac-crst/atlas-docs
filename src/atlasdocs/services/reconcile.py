@@ -84,6 +84,9 @@ class ReconcileService:
                 seen_ids.add(doc.id)
                 existing = self._documents.get_external_reference(doc.id)
                 if existing is not None:
+                    if existing.entity is not None and existing.entity.deleted_at is not None:
+                        # Intentional Atlas tombstone — do not recreate or report missing.
+                        continue
                     summary.already_present.append(doc.id)
                     continue
                 if dry_run:
@@ -99,6 +102,8 @@ class ReconcileService:
 
         refs = self._documents.list_paperless_external_references()
         for ref in refs:
+            if ref.entity is not None and ref.entity.deleted_at is not None:
+                continue
             try:
                 paperless_id = int(ref.external_id)
             except ValueError:
