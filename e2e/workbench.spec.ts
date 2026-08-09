@@ -63,9 +63,15 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   );
   await page.getByLabel(/^Search$/i).fill("Ali");
   await page.getByRole("button", { name: /Apply filters/i }).click();
-  await expect(page.getByText(/Alice|No results for this Explore query/i).first()).toBeVisible({
+  const alice = page.getByRole("link", { name: /^Alice$/i });
+  await expect(alice.or(page.getByText(/No results for this Explore query/i))).toBeVisible({
     timeout: 15000,
   });
+  if (await alice.count()) {
+    await alice.first().click();
+    await expect(page.getByRole("heading", { name: /^Alice$/i })).toBeVisible();
+    await expect(page.getByText(/Related documents|Backlinks|Outgoing relationships/i).first()).toBeVisible();
+  }
   await expect(page.getByText(password)).toHaveCount(0);
 
   await page.getByRole("link", { name: /^Classify$/i }).first().click();

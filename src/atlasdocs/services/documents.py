@@ -80,6 +80,26 @@ class RelationshipView:
 
 
 @dataclass(frozen=True)
+class BacklinkView:
+    id: str
+    type: str
+    source: str
+    source_entity_id: str
+    origin: str
+    status: str
+    source_paperless_document_id: int | None = None
+
+
+@dataclass(frozen=True)
+class RelatedDocumentView:
+    paperless_document_id: int
+    entity_id: str
+    label: str
+    created_date: str | None = None
+    relationship_type: str | None = None
+
+
+@dataclass(frozen=True)
 class EntityView:
     id: str
     entity_type: str
@@ -93,6 +113,8 @@ class EntityView:
     relationships: list[RelationshipView] | None = None
     display_type: str | None = None
     semantic_completeness: str = "empty"
+    backlinks: list[BacklinkView] | None = None
+    related_documents: list[RelatedDocumentView] | None = None
 
 
 @dataclass(frozen=True)
@@ -457,6 +479,56 @@ class DocumentService:
         views.sort(key=lambda item: (item.type, item.target))
         return views
 
+    def _backlink_and_related(
+        self, entity: Entity, token: str
+    ) -> tuple[list[BacklinkView], list[RelatedDocumentView]]:
+        backlinks: list[BacklinkView] = []
+        related: list[RelatedDocumentView] = []
+        seen_docs: set[int] = set()
+        incoming = list(entity.incoming_relationships or [])
+        incoming.sort(
+            key=lambda rel: (
+                rel.relationship_type.code if rel.relationship_type else "",
+                str(rel.source_entity_id),
+            )
+        )
+        for rel in incoming:
+            source = rel.source_entity
+            try:
+                paperless_doc = self._ensure_entity_readable(source, token)
+            except (ForbiddenDocumentError, NotFoundError):
+                continue
+            paperless_id = self._paperless_id_for_entity(source)
+            source_label = (
+                paperless_doc.title
+                if paperless_doc and paperless_doc.title
+                else self._entity_label(source)
+            )
+            backlinks.append(
+                BacklinkView(
+                    id=str(rel.id),
+                    type=rel.relationship_type.code,
+                    source=source_label,
+                    source_entity_id=str(rel.source_entity_id),
+                    origin=rel.origin.value,
+                    status=rel.status.value,
+                    source_paperless_document_id=paperless_id,
+                )
+            )
+            if paperless_id is None or paperless_id in seen_docs:
+                continue
+            seen_docs.add(paperless_id)
+            related.append(
+                RelatedDocumentView(
+                    paperless_document_id=paperless_id,
+                    entity_id=str(source.id),
+                    label=source_label or f"Document {paperless_id}",
+                    created_date=paperless_doc.created_date if paperless_doc else None,
+                    relationship_type=rel.relationship_type.code,
+                )
+            )
+        return backlinks, related
+
     def _entity_relationship_options(self):
         return (
             joinedload(Entity.outgoing_relationships)
@@ -467,6 +539,14 @@ class DocumentService:
             .joinedload(Entity.concept),
             joinedload(Entity.outgoing_relationships)
             .joinedload(Relationship.target_entity)
+            .joinedload(Entity.external_reference),
+            joinedload(Entity.incoming_relationships)
+            .joinedload(Relationship.relationship_type),
+            joinedload(Entity.incoming_relationships)
+            .joinedload(Relationship.source_entity)
+            .joinedload(Entity.concept),
+            joinedload(Entity.incoming_relationships)
+            .joinedload(Relationship.source_entity)
             .joinedload(Entity.external_reference),
             joinedload(Entity.external_reference),
             joinedload(Entity.concept).joinedload(Concept.ontology),
@@ -729,6 +809,7 @@ class DocumentService:
         paperless_doc = self._ensure_entity_readable(entity, auth)
         paperless_id = self._paperless_id_for_entity(entity)
         display_type = self._registry_type_for_entity(entity)
+        backlinks, related_documents = self._backlink_and_related(entity, auth)
         return EntityView(
             id=str(entity.id),
             entity_type=entity.entity_type.value,
@@ -748,6 +829,8 @@ class DocumentService:
             ),
             relationships=self._relationship_views(entity),
             semantic_completeness=entity.semantic_completeness or "empty",
+            backlinks=backlinks,
+            related_documents=related_documents,
         )
 
     def list_entity_relationships(

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from atlasdocs.api.schemas import (
+    BacklinkResponse,
     BulkRelationshipResultResponse,
     BulkRelationshipsRequest,
     BulkRelationshipsResponse,
@@ -18,6 +19,7 @@ from atlasdocs.api.schemas import (
     IngestionJobsResponse,
     ReconcileRequest,
     ReconcileResponse,
+    RelatedDocumentResponse,
     RelationshipResponse,
     RelationshipTypeResponse,
     UnclassifiedDocumentResponse,
@@ -151,6 +153,28 @@ def _serialize_entity(entity) -> EntityResponse:
         relationships=[_serialize_relationship(item) for item in (entity.relationships or [])],
         display_type=getattr(entity, "display_type", None),
         semantic_completeness=getattr(entity, "semantic_completeness", "empty") or "empty",
+        backlinks=[
+            BacklinkResponse(
+                id=item.id,
+                type=item.type,
+                source=item.source,
+                source_entity_id=item.source_entity_id,
+                origin=item.origin,
+                status=item.status,
+                source_paperless_document_id=item.source_paperless_document_id,
+            )
+            for item in (getattr(entity, "backlinks", None) or [])
+        ],
+        related_documents=[
+            RelatedDocumentResponse(
+                paperless_document_id=item.paperless_document_id,
+                entity_id=item.entity_id,
+                label=item.label,
+                created_date=item.created_date,
+                relationship_type=item.relationship_type,
+            )
+            for item in (getattr(entity, "related_documents", None) or [])
+        ],
     )
 
 

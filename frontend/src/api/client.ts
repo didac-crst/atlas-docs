@@ -13,6 +13,41 @@ export type Relationship = {
   source_entity_id: string | null;
 };
 
+export type Backlink = {
+  id: string;
+  type: string;
+  source: string;
+  source_entity_id: string;
+  origin: string;
+  status: string;
+  source_paperless_document_id: number | null;
+};
+
+export type RelatedDocument = {
+  paperless_document_id: number;
+  entity_id: string;
+  label: string;
+  created_date: string | null;
+  relationship_type: string | null;
+};
+
+export type EntityDetail = {
+  id: string;
+  entity_type: string;
+  label: string;
+  paperless_document_id: number | null;
+  title: string | null;
+  created_date: string | null;
+  correspondent: string | null;
+  document_type: string | null;
+  open_url: string | null;
+  relationships: Relationship[];
+  display_type: string | null;
+  semantic_completeness: string;
+  backlinks: Backlink[];
+  related_documents: RelatedDocument[];
+};
+
 export type DocumentDetail = {
   paperless_document_id: number;
   entity_id: string | null;
@@ -423,6 +458,10 @@ export function fetchQueue(page = 1) {
 
 export function fetchDocument(id: number) {
   return apiFetch<DocumentDetail>(`/ui/api/documents/${id}`);
+}
+
+export function fetchEntity(entityId: string) {
+  return apiFetch<EntityDetail>(`/ui/api/entities/${encodeURIComponent(entityId)}`);
 }
 
 export function fetchRelationshipTypes() {

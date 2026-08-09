@@ -28,7 +28,11 @@ function completenessLabel(value: string): string {
 
 export function ExploreResultCard({ item, view }: Props) {
   const isDocument = item.entity_type === "document" && item.paperless_document_id != null;
-  const href = isDocument ? `/documents/${item.paperless_document_id}` : null;
+  const href = isDocument
+    ? `/documents/${item.paperless_document_id}`
+    : item.id
+      ? `/entities/${item.id}`
+      : null;
   const meta =
     item.subtitle ||
     [item.created_date, item.correspondent, item.document_type].filter(Boolean).join(" · ");

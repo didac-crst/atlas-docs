@@ -42,7 +42,7 @@ describe("ExploreResultCard", () => {
     expect(screen.queryByText("184")).toBeNull();
   });
 
-  it("renders non-document entities without detail link", () => {
+  it("renders non-document entities with entity detail links", () => {
     render(
       <MemoryRouter>
         <ExploreResultCard
@@ -61,8 +61,10 @@ describe("ExploreResultCard", () => {
         />
       </MemoryRouter>,
     );
-    expect(screen.getByText("Alice")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Alice/i })).toBeNull();
+    expect(screen.getByRole("link", { name: /Alice/i })).toHaveAttribute(
+      "href",
+      "/entities/person-1",
+    );
     expect(screen.queryByRole("link", { name: /^Preview$/i })).toBeNull();
   });
 });

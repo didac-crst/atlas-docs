@@ -22,7 +22,6 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from atlasdocs.api.routes import get_paperless_client
 from atlasdocs.api.schemas import (
     BulkRelationshipResultResponse,
     BulkRelationshipsRequest,
@@ -30,6 +29,7 @@ from atlasdocs.api.schemas import (
     ConceptResponse,
     CreateRelationshipRequest,
     DocumentResponse,
+    EntityResponse,
     EntitySearchHitResponse,
     EntityTypeRegistryResponse,
     ExplorePageResponse,
@@ -47,6 +47,7 @@ from atlasdocs.api.schemas import (
     UnclassifiedDocumentResponse,
     UnclassifiedPageResponse,
 )
+from atlasdocs.api.routes import get_paperless_client, _serialize_entity
 from atlasdocs.config import UNCLASSIFIED_PAGE_SIZE
 from atlasdocs.db.session import get_db
 from atlasdocs.security.redact import redact_secrets
@@ -457,6 +458,21 @@ def search_entities(
     response = JSONResponse(content=[item.model_dump() for item in payload])
     set_session_cookie(response, ui_session)
     return response
+
+
+@api_router.get("/entities/{entity_id}", response_model=EntityResponse)
+def get_entity_detail(
+    request: Request,
+    entity_id: str,
+    db: Session = Depends(get_db),
+    service: DocumentService = Depends(get_ui_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    try:
+        entity = service.get_entity(entity_id, token=auth)
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_entity(entity), ui_session)
 
 
 @api_router.get("/explore", response_model=ExplorePageResponse)

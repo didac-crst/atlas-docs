@@ -159,7 +159,11 @@ export function SemanticDocumentDetail({
                 <li key={rel.id} className="rel-item">
                   <div>
                     <strong>{rel.type}</strong>{" "}
-                    <EntityReference label={rel.target} relationshipType={rel.type} />
+                    <EntityReference
+                      label={rel.target}
+                      relationshipType={rel.type}
+                      entityId={rel.target_entity_id}
+                    />
                     <div className="meta muted">
                       Provenance: {rel.origin} · Status: {rel.status}
                     </div>

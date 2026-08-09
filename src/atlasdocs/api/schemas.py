@@ -25,6 +25,24 @@ class RelationshipResponse(BaseModel):
     source_entity_id: str | None = None
 
 
+class BacklinkResponse(BaseModel):
+    id: str
+    type: str
+    source: str
+    source_entity_id: str
+    origin: str
+    status: str
+    source_paperless_document_id: int | None = None
+
+
+class RelatedDocumentResponse(BaseModel):
+    paperless_document_id: int
+    entity_id: str
+    label: str
+    created_date: str | None = None
+    relationship_type: str | None = None
+
+
 class DocumentResponse(BaseModel):
     paperless_document_id: int
     entity_id: str | None = None
@@ -50,6 +68,8 @@ class EntityResponse(BaseModel):
     relationships: list[RelationshipResponse] = Field(default_factory=list)
     display_type: str | None = None
     semantic_completeness: str = "empty"
+    backlinks: list[BacklinkResponse] = Field(default_factory=list)
+    related_documents: list[RelatedDocumentResponse] = Field(default_factory=list)
 
 
 class UnclassifiedDocumentResponse(BaseModel):

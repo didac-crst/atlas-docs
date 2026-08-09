@@ -36,7 +36,7 @@ Router: `src/atlasdocs/api/routes.py`.
 | GET | `/explore` | Entity-oriented Explore page (`mode`, filters, sort, pagination) |
 | GET | `/entity-types` | Entity type registry (display metadata) |
 | GET | `/entities/search` | Entity search / autocomplete |
-| GET | `/entities/{entity_id}` | Entity detail + outgoing relationships |
+| GET | `/entities/{entity_id}` | Entity detail + outgoing relationships, backlinks, related documents |
 | GET | `/entities/{entity_id}/relationships` | Outgoing relationships |
 | POST | `/entities/{entity_id}/relationships` | Create edge |
 | DELETE | `/relationships/{relationship_id}` | Delete edge (+ companions) |

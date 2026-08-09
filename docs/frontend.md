@@ -63,6 +63,7 @@ header. The SPA does not send the Paperless token to those paths.
 | --- | --- |
 | `/ui/` | Home task chooser |
 | `/ui/explore` | Explore browse (modes, filters, list/grid) |
+| `/ui/entities/:id` | Entity detail (concepts/people/orgs; documents redirect) |
 | `/ui/classify` | Searchable classification workbench + bulk assign |
 | `/ui/ingest` | Upload + ingestion job list |
 | `/ui/documents/:id` | Document detail + composer |
@@ -87,6 +88,7 @@ header. The SPA does not send the Paperless token to those paths.
 | GET | `/ui/api/entity-types` | Entity type registry |
 | GET | `/ui/api/explore` | Entity-oriented Explore results |
 | GET | `/ui/api/entities/search` | Atlas entity autocomplete (`q`, `entity_type`, `ontology`) |
+| GET | `/ui/api/entities/{id}` | Entity detail with relationships, backlinks, related documents |
 | GET | `/ui/api/concepts` | Concept autocomplete (`q`, `ontology`) |
 | POST | `/ui/api/ingest` | Multipart upload → durable job |
 | GET | `/ui/api/ingest/jobs` | Current identity’s jobs |

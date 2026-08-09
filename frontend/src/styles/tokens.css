@@ -918,3 +918,62 @@ a.explore-card-title:hover {
     grid-template-columns: 1fr;
   }
 }
+
+.entity-detail-page {
+  display: grid;
+  gap: var(--space-5);
+  max-width: 48rem;
+}
+
+.entity-detail-back a {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.entity-detail-back a:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.entity-detail-header h1 {
+  margin: var(--space-2) 0;
+}
+
+.entity-detail-section h2 {
+  margin: 0 0 var(--space-3);
+  font-size: 1.1rem;
+}
+
+.entity-related-list,
+.entity-rel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.entity-related-list a,
+.entity-rel-list a {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.entity-related-list a:hover,
+.entity-rel-list a:hover {
+  text-decoration: underline;
+}
+
+.entity-related-list .meta,
+.entity-rel-list .meta {
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.entity-reference-link {
+  text-decoration: none;
+}
+
+.entity-reference-link:hover .entity-chip {
+  filter: brightness(0.97);
+}

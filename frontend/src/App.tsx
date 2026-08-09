@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { ApiError, disconnect, getSession, type SessionInfo } from "./api/client";
 import { ConnectPage } from "./pages/ConnectPage";
+import { EntityDetailPage } from "./pages/EntityDetailPage";
 import { ExplorePage } from "./pages/ExplorePage";
 import { HomePage } from "./pages/HomePage";
 import { IngestPage } from "./pages/IngestPage";
@@ -165,6 +166,16 @@ export function App() {
             element={
               authenticated && session ? (
                 <ExplorePage session={session} />
+              ) : (
+                <Navigate to="/connect" replace />
+              )
+            }
+          />
+          <Route
+            path="/entities/:entityId"
+            element={
+              authenticated && session ? (
+                <EntityDetailPage session={session} />
               ) : (
                 <Navigate to="/connect" replace />
               )
