@@ -292,6 +292,8 @@ class FakePaperlessTransport(httpx.BaseTransport):
         if len(parts) >= 2 and parts[-1] in {"preview", "download"}:
             kind = parts[-1]
             document_id = int(parts[-2])
+            if not self._authorized(request):
+                return httpx.Response(401, json={"detail": "unauthorized"})
             if document_id in self.timeout:
                 raise httpx.TimeoutException("timed out", request=request)
             if document_id in self.server_error:

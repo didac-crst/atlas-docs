@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from atlasdocs.services.ingest import spool_dir
+from atlasdocs.services.paperless import PaperlessAuthError, PaperlessClient
 from tests.fakes import FakePaperlessTransport
 
 
@@ -129,6 +132,32 @@ def test_preview_rejects_non_image_non_pdf(
     response = client.get("/ui/api/documents/184/preview")
     assert response.status_code == 415
     assert response.json()["detail"] == "Preview is only available for PDF and raster images"
+
+
+def test_fake_preview_download_require_authorization(
+    paperless_transport: FakePaperlessTransport,
+) -> None:
+    """Regression: content endpoints must not serve bytes without Authorization."""
+    paperless_transport.valid_tokens = {"accepted-token"}
+
+    with pytest.raises(PaperlessAuthError):
+        PaperlessClient(base_url="http://paperless.test", transport=paperless_transport).stream_document_file(
+            "", 184, kind="preview"
+        )
+
+    wrong = httpx.Request(
+        "GET",
+        "http://paperless.test/api/documents/184/preview/",
+        headers={"Authorization": "Token wrong"},
+    )
+    assert paperless_transport.handle_request(wrong).status_code == 401
+
+    ok = httpx.Request(
+        "GET",
+        "http://paperless.test/api/documents/184/download/",
+        headers={"Authorization": "Token accepted-token"},
+    )
+    assert paperless_transport.handle_request(ok).status_code == 200
 
 
 def test_no_atlasdocs_disk_write_of_document_bytes(
