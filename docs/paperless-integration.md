@@ -75,8 +75,8 @@ Verified against deployed **Paperless-ngx 3.0.5** (API v10): consume task rows
 expose `related_document_ids` and `result_data.document_id` when populate
 succeeds, but those fields are **not always present**. There is no
 `related_document` key on API v10 task objects. AtlasDocs therefore polls the
-task to a terminal status, parses every documented id field, and falls back to
-documented title search when needed.
+task to a terminal status and parses every documented id field. It does **not**
+fall back to title search.
 
 ### Job FSM
 
@@ -84,7 +84,7 @@ documented title search when needed.
 | --- | --- |
 | `UPLOADING` | Spool on disk; forward to Paperless when claimed |
 | `PROCESSING` | `post_document` task id recorded; poll Paperless task status |
-| `RESOLVING_DOCUMENT` | Task succeeded but payload lacked a document id; correlate by title |
+| `RESOLVING_DOCUMENT` | Task succeeded but payload lacked a document id; keep polling the task for an id |
 | `RETRYABLE_FAILURE` | Resolution timed out or worker error with spool still present; operator may retry |
 | `READY` | Document id bound; semantic entity created; spool and job token wiped |
 | `FAILED` | Terminal error (duplicate, auth, task failure, missing spool, processing timeout) |
@@ -131,7 +131,7 @@ document duplicate authority on consume.
 `POST /ui/api/ingest/jobs/{id}/retry` (session auth + CSRF) resets a
 `RETRYABLE_FAILURE` job:
 
-- When `paperless_task_id` is set → `RESOLVING_DOCUMENT` (re-run title / task lookup)
+- When `paperless_task_id` is set → `RESOLVING_DOCUMENT` (resume task id polling)
 - When no task id but spool exists → `UPLOADING` (re-post)
 
 Terminal `FAILED` jobs cannot be retried.

@@ -117,6 +117,7 @@ class EntityView:
     semantic_completeness: str = "empty"
     backlinks: list[BacklinkView] | None = None
     related_documents: list[RelatedDocumentView] | None = None
+    backlinks_truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -320,14 +321,14 @@ class DocumentService:
                 self._session.flush()
                 self._recalculate_completeness(entity)
                 return entity
-        except IntegrityError:
+        except IntegrityError as exc:
             existing = self._get_external_reference(paperless_document_id)
             if existing is None:
                 raise
             if existing.entity is not None and existing.entity.deleted_at is not None:
                 raise ConflictError(
                     "Paperless document is bound to a deleted AtlasDocs entity"
-                )
+                ) from exc
             return existing.entity
 
     def _load_entity(self, entity_id: uuid.UUID) -> Entity:
@@ -498,11 +499,12 @@ class DocumentService:
         return views
 
     def _backlink_and_related(
-        self, entity: Entity, token: str
-    ) -> tuple[list[BacklinkView], list[RelatedDocumentView]]:
+        self, entity: Entity, token: str, *, limit: int = 50
+    ) -> tuple[list[BacklinkView], list[RelatedDocumentView], bool]:
         backlinks: list[BacklinkView] = []
         related: list[RelatedDocumentView] = []
         seen_docs: set[int] = set()
+        truncated = False
         incoming = list(entity.incoming_relationships or [])
         incoming.sort(
             key=lambda rel: (
@@ -511,6 +513,9 @@ class DocumentService:
             )
         )
         for rel in incoming:
+            if len(backlinks) >= limit:
+                truncated = True
+                break
             source = rel.source_entity
             if source is None or source.deleted_at is not None:
                 continue
@@ -547,7 +552,7 @@ class DocumentService:
                     relationship_type=rel.relationship_type.code,
                 )
             )
-        return backlinks, related
+        return backlinks, related, truncated
 
     def _entity_relationship_options(self):
         return (
@@ -831,7 +836,9 @@ class DocumentService:
         paperless_doc = self._ensure_entity_readable(entity, auth)
         paperless_id = self._paperless_id_for_entity(entity)
         display_type = self._registry_type_for_entity(entity)
-        backlinks, related_documents = self._backlink_and_related(entity, auth)
+        backlinks, related_documents, backlinks_truncated = self._backlink_and_related(
+            entity, auth
+        )
         return EntityView(
             id=str(entity.id),
             entity_type=entity.entity_type.value,
@@ -853,6 +860,7 @@ class DocumentService:
             semantic_completeness=entity.semantic_completeness or "empty",
             backlinks=backlinks,
             related_documents=related_documents,
+            backlinks_truncated=backlinks_truncated,
         )
 
     def list_entity_relationships(
@@ -1030,6 +1038,9 @@ class DocumentService:
             raise ValidationError("Invalid Paperless external reference") from exc
 
         if previous_external_id == new_external_id:
+            # Already switched (e.g. retry after cleanup failure) — finish retiring
+            # the previous Paperless id recorded in replacement history.
+            self._retire_previous_paperless_from_history(entity, token)
             self._recalculate_completeness(entity)
             return entity
 
@@ -1050,19 +1061,44 @@ class DocumentService:
         self._session.add(history)
         self._session.flush()
 
+        self._delete_retired_paperless_document(old_paperless_id, token)
+        self._recalculate_completeness(entity)
+        return entity
+
+    def _retire_previous_paperless_from_history(self, entity: Entity, token: str) -> None:
+        ref = entity.external_reference
+        if ref is None or ref.system != EXTERNAL_SYSTEM_PAPERLESS:
+            return
+        history = self._session.scalar(
+            select(DocumentReplacementHistory)
+            .where(
+                DocumentReplacementHistory.entity_id == entity.id,
+                DocumentReplacementHistory.new_external_id == ref.external_id,
+            )
+            .order_by(DocumentReplacementHistory.created_at.desc())
+        )
+        if history is None:
+            return
         try:
-            self._paperless.delete_document(old_paperless_id, token)
+            old_id = int(history.previous_external_id)
+        except ValueError:
+            return
+        if history.previous_external_id == ref.external_id:
+            return
+        self._delete_retired_paperless_document(old_id, token)
+
+    def _delete_retired_paperless_document(self, paperless_document_id: int, token: str) -> None:
+        try:
+            self._paperless.delete_document(paperless_document_id, token)
         except PaperlessNotFoundError:
-            pass
-        except PaperlessAuthError as exc:
-            raise ForbiddenDocumentError(str(exc)) from exc
+            return
+        except PaperlessAuthError:
+            # Switch already committed; inaccessible old originals are left as Paperless orphans.
+            return
         except PaperlessUnavailableError as exc:
             raise UpstreamError(str(exc)) from exc
         except PaperlessError as exc:
             raise UpstreamError(str(exc)) from exc
-
-        self._recalculate_completeness(entity)
-        return entity
 
     def list_unclassified(
         self,
@@ -1459,6 +1495,10 @@ class DocumentService:
         tag: str | None = None,
         completeness: str | None = None,
         relationship_type: str | None = None,
+        person: str | None = None,
+        organization: str | None = None,
+        country: str | None = None,
+        case: str | None = None,
     ) -> ExplorePage:
         """Entity-oriented Explore query (Paperless metadata ∩ Atlas semantics)."""
         auth = self._require_token(token)
@@ -1514,15 +1554,102 @@ class DocumentService:
                 tag=tag,
                 completeness=completeness_norm,
                 relationship_type=relationship_type,
+                person=person,
+                organization=organization,
+                country=country,
+                case=case,
             )
+        # Concept modes: apply the matching typed filter as an additional name needle.
+        typed = {
+            "person": person,
+            "organization": organization,
+            "country": country,
+            "case": case,
+        }.get(mode_norm)
+        concept_q = q
+        if typed and typed.strip():
+            concept_q = f"{q} {typed}".strip() if q and q.strip() else typed.strip()
         return self._explore_concepts(
             auth,
             mode=mode_norm,
             page=page,
             page_size=size,
-            q=q,
+            q=concept_q,
             completeness=completeness_norm,
         )
+
+    def _paperless_ids_for_related_filters(
+        self,
+        *,
+        person: str | None,
+        organization: str | None,
+        country: str | None,
+        case: str | None,
+    ) -> set[int] | None:
+        """Paperless ids linked to matching related concepts. None = no related filters."""
+        wanted = [
+            ("person", (person or "").strip()),
+            ("organization", (organization or "").strip()),
+            ("country", (country or "").strip()),
+            ("case", (case or "").strip()),
+        ]
+        active = [(code, needle) for code, needle in wanted if needle]
+        if not active:
+            return None
+
+        allowed: set[int] | None = None
+        for registry_code, needle in active:
+            ontology_code = ontology_for_registry_code(registry_code)
+            if not ontology_code:
+                return set()
+            ontology = self._session.scalar(select(Ontology).where(Ontology.code == ontology_code))
+            if ontology is None:
+                return set()
+            escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            concept_ids = list(
+                self._session.scalars(
+                    select(Concept.id).where(
+                        Concept.ontology_id == ontology.id,
+                        or_(
+                            Concept.code.ilike(pattern, escape="\\"),
+                            Concept.name.ilike(pattern, escape="\\"),
+                        ),
+                    )
+                )
+            )
+            if not concept_ids:
+                return set()
+            source_ids = list(
+                self._session.scalars(
+                    select(Relationship.source_entity_id)
+                    .where(
+                        Relationship.target_entity_id.in_(concept_ids),
+                        Relationship.status == RelationshipStatus.confirmed,
+                    )
+                    .distinct()
+                )
+            )
+            if not source_ids:
+                return set()
+            refs = list(
+                self._session.scalars(
+                    select(ExternalReference).where(
+                        ExternalReference.system == EXTERNAL_SYSTEM_PAPERLESS,
+                        ExternalReference.entity_id.in_(source_ids),
+                    )
+                )
+            )
+            ids: set[int] = set()
+            for ref in refs:
+                try:
+                    ids.add(int(ref.external_id))
+                except ValueError:
+                    continue
+            allowed = ids if allowed is None else (allowed & ids)
+            if not allowed:
+                return set()
+        return allowed or set()
 
     def _explore_documents(
         self,
@@ -1541,69 +1668,165 @@ class DocumentService:
         tag: str | None,
         completeness: str | None,
         relationship_type: str | None,
+        person: str | None = None,
+        organization: str | None = None,
+        country: str | None = None,
+        case: str | None = None,
     ) -> ExplorePage:
-        classification = "any"
-        listed = self.list_documents(
-            auth,
-            page=page,
-            page_size=page_size,
-            q=q,
-            classification=classification,
-            sort=sort,
-            order=order,
-            created_gte=created_gte,
-            created_lte=created_lte,
-            correspondent=correspondent,
-            document_type=document_type,
-            tag=tag,
-            completeness=completeness,
-        )
         rel_filter = (relationship_type or "").strip().lower() or None
-        items: list[ExploreResultItem] = []
-        for doc in listed.items:
-            ref = self._get_external_reference(doc.paperless_document_id)
-            entity = None
-            if ref is not None:
-                entity = self._session.scalars(
-                    select(Entity)
-                    .options(*self._entity_relationship_options())
-                    .where(Entity.id == ref.entity_id)
-                ).unique().one_or_none()
-            summary = self._relationship_summary(entity)
-            if rel_filter and not any(line.startswith(f"{rel_filter}:") for line in summary):
-                continue
-            items.append(
-                ExploreResultItem(
-                    id=str(ref.entity_id) if ref is not None else None,
-                    label=doc.title or f"Document {doc.paperless_document_id}",
-                    entity_type="document",
-                    semantic_completeness=doc.semantic_completeness or "empty",
-                    subtitle=" · ".join(
-                        part
-                        for part in (doc.created_date, doc.correspondent, doc.document_type)
-                        if part
-                    )
-                    or None,
-                    paperless_document_id=doc.paperless_document_id,
-                    open_url=self._settings.paperless_document_url(doc.paperless_document_id),
-                    preview_available=True,
-                    download_available=True,
-                    relationship_summary=summary,
-                    created_date=doc.created_date,
-                    correspondent=doc.correspondent,
-                    document_type=doc.document_type,
-                )
+        related_ids = self._paperless_ids_for_related_filters(
+            person=person,
+            organization=organization,
+            country=country,
+            case=case,
+        )
+        if related_ids is not None and not related_ids:
+            return ExplorePage(
+                items=[],
+                page=page,
+                page_size=page_size,
+                mode=mode,
+                has_next=False,
+                has_previous=page > 1,
+                next_page=None,
+                total_hint=0,
             )
+        needs_post_filter = rel_filter is not None or related_ids is not None
+        max_upstream = (
+            self._settings.unclassified_max_upstream_pages or UNCLASSIFIED_MAX_UPSTREAM_PAGES
+        )
+        collect_limit = page_size + 1 if needs_post_filter else page_size
+
+        collected: list = []
+        paperless_count = 0
+        upstream_page = 1 if needs_post_filter else page
+        pages_fetched = 0
+        has_next_upstream = False
+        skip = (page - 1) * page_size if needs_post_filter else 0
+        matched_before_page = 0
+
+        while pages_fetched < max_upstream:
+            listed = self.list_documents(
+                auth,
+                page=upstream_page,
+                page_size=page_size,
+                q=q,
+                classification="any",
+                sort=sort,
+                order=order,
+                created_gte=created_gte,
+                created_lte=created_lte,
+                correspondent=correspondent,
+                document_type=document_type,
+                tag=tag,
+                completeness=completeness,
+            )
+            pages_fetched += 1
+            paperless_count = listed.paperless_count
+            has_next_upstream = listed.has_next
+
+            doc_ids = [doc.paperless_document_id for doc in listed.items]
+            refs_by_id = self._external_refs_by_paperless_ids(doc_ids)
+            entity_ids = [ref.entity_id for ref in refs_by_id.values()]
+            entities_by_id = self._entities_by_ids(entity_ids)
+
+            for doc in listed.items:
+                if related_ids is not None and doc.paperless_document_id not in related_ids:
+                    continue
+                ref = refs_by_id.get(doc.paperless_document_id)
+                entity = entities_by_id.get(ref.entity_id) if ref is not None else None
+                if entity is not None and entity.deleted_at is not None:
+                    continue
+                summary = self._relationship_summary(entity)
+                if rel_filter and not any(line.startswith(f"{rel_filter}:") for line in summary):
+                    continue
+                if needs_post_filter:
+                    if matched_before_page < skip:
+                        matched_before_page += 1
+                        continue
+                collected.append((doc, ref, summary))
+                if len(collected) >= collect_limit:
+                    break
+
+            if not needs_post_filter:
+                break
+            if len(collected) >= collect_limit:
+                break
+            if not has_next_upstream:
+                break
+            upstream_page += 1
+
+        items = [
+            ExploreResultItem(
+                id=str(ref.entity_id) if ref is not None else None,
+                label=doc.title or f"Document {doc.paperless_document_id}",
+                entity_type="document",
+                semantic_completeness=doc.semantic_completeness or "empty",
+                subtitle=" · ".join(
+                    part
+                    for part in (doc.created_date, doc.correspondent, doc.document_type)
+                    if part
+                )
+                or None,
+                paperless_document_id=doc.paperless_document_id,
+                open_url=self._settings.paperless_document_url(doc.paperless_document_id),
+                preview_available=True,
+                download_available=True,
+                relationship_summary=summary,
+                created_date=doc.created_date,
+                correspondent=doc.correspondent,
+                document_type=doc.document_type,
+            )
+            for doc, ref, summary in collected[:page_size]
+        ]
+        if needs_post_filter:
+            has_next = len(collected) > page_size
+        else:
+            has_next = has_next_upstream
+        has_previous = page > 1
+        next_page = page + 1 if has_next else None
         return ExplorePage(
             items=items,
-            page=listed.page,
-            page_size=listed.page_size,
+            page=page,
+            page_size=page_size,
             mode=mode,
-            has_next=listed.has_next,
-            has_previous=listed.has_previous,
-            next_page=listed.next_page,
-            total_hint=listed.paperless_count,
+            has_next=has_next,
+            has_previous=has_previous,
+            next_page=next_page,
+            total_hint=paperless_count if related_ids is None and rel_filter is None else None,
         )
+
+    def _external_refs_by_paperless_ids(
+        self, paperless_ids: list[int]
+    ) -> dict[int, ExternalReference]:
+        if not paperless_ids:
+            return {}
+        external_ids = [self._paperless_external_id(doc_id) for doc_id in paperless_ids]
+        rows = self._session.scalars(
+            select(ExternalReference)
+            .options(joinedload(ExternalReference.entity))
+            .where(
+                ExternalReference.system == EXTERNAL_SYSTEM_PAPERLESS,
+                ExternalReference.external_id.in_(external_ids),
+            )
+        ).unique()
+        by_id: dict[int, ExternalReference] = {}
+        for ref in rows:
+            try:
+                by_id[int(ref.external_id)] = ref
+            except ValueError:
+                continue
+        return by_id
+
+    def _entities_by_ids(self, entity_ids: list[uuid.UUID]) -> dict[uuid.UUID, Entity]:
+        if not entity_ids:
+            return {}
+        rows = self._session.scalars(
+            select(Entity)
+            .options(*self._entity_relationship_options())
+            .where(Entity.id.in_(entity_ids))
+        ).unique()
+        return {row.id: row for row in rows}
 
     def _explore_concepts(
         self,

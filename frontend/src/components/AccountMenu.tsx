@@ -9,6 +9,7 @@ type Props = {
 export function AccountMenu({ usernameLabel, onDisconnect }: Props) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
   const location = useLocation();
   const label = usernameLabel?.trim() || "Account";
@@ -29,6 +30,7 @@ export function AccountMenu({ usernameLabel, onDisconnect }: Props) {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setOpen(false);
+        triggerRef.current?.focus();
       }
     }
 
@@ -43,6 +45,7 @@ export function AccountMenu({ usernameLabel, onDisconnect }: Props) {
   return (
     <div className="account-menu" ref={rootRef}>
       <button
+        ref={triggerRef}
         type="button"
         className="account-menu-trigger"
         aria-expanded={open}

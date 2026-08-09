@@ -35,11 +35,12 @@ def test_entity_detail_includes_backlinks_and_related_documents(client: TestClie
 def test_entity_backlinks_hide_inaccessible_sources(
     client: TestClient, paperless_transport: FakePaperlessTransport
 ) -> None:
-    client.post(
+    created = client.post(
         "/documents/184/relationships",
         headers=AUTH,
         json={"relationship": "source-country", "target": "Germany"},
     )
+    assert created.status_code == 201
     germany = client.get(
         "/entities/search",
         headers=AUTH,

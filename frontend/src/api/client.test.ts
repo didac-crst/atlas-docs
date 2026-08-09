@@ -84,9 +84,11 @@ describe("buildExploreQuery", () => {
         order: "asc",
         completeness: "any",
         relationship_type: "concerns-person",
+        person: "Alice",
+        country: "Germany",
       }),
     ).toBe(
-      "mode=people&page=2&q=Ali&sort=title&order=asc&relationship_type=concerns-person",
+      "mode=people&page=2&q=Ali&sort=title&order=asc&relationship_type=concerns-person&person=Alice&country=Germany",
     );
   });
 });

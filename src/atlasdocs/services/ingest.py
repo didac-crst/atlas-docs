@@ -756,7 +756,11 @@ class IngestionWorker:
             self._reschedule_resolving(job)
             return
         except (ConflictError, ValidationError) as exc:
-            self._fail_terminal(job, "replace_rejected", safe_error_message(str(exc)))
+            self._fail_terminal(
+                job,
+                "replace_rejected",
+                safe_error_message(exc, fallback="Replacement rejected"),
+            )
             return
 
         job.paperless_document_id = doc_id

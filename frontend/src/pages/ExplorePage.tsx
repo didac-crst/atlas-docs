@@ -141,19 +141,24 @@ export function ExplorePage({ session: _session }: Props) {
       setLoading(true);
       setError(null);
       try {
+        const documentMode = mode === "all" || mode === "documents";
         const next = await fetchExplore({
           mode,
           page,
           q: filters.q,
           sort: filters.sort,
           order: filters.order,
-          created_gte: filters.created_gte,
-          created_lte: filters.created_lte,
-          correspondent: filters.correspondent,
-          document_type: filters.document_type,
-          tag: filters.tag,
           completeness: filters.completeness,
-          relationship_type: filters.relationship_type,
+          ...(documentMode
+            ? {
+                created_gte: filters.created_gte,
+                created_lte: filters.created_lte,
+                correspondent: filters.correspondent,
+                document_type: filters.document_type,
+                tag: filters.tag,
+                relationship_type: filters.relationship_type,
+              }
+            : {}),
         });
         if (!cancelled) setResults(next);
       } catch (err) {
@@ -183,17 +188,24 @@ export function ExplorePage({ session: _session }: Props) {
     const nextMode = overrides.mode ?? mode;
     const nextView = overrides.view ?? view;
     const nextPage = overrides.page ?? page;
+    const documentMode = nextMode === "all" || nextMode === "documents";
     const nextFilters: ExploreFilters = {
       q: overrides.q ?? filters.q,
       sort: overrides.sort ?? filters.sort,
       order: overrides.order ?? filters.order,
-      created_gte: overrides.created_gte ?? filters.created_gte,
-      created_lte: overrides.created_lte ?? filters.created_lte,
-      correspondent: overrides.correspondent ?? filters.correspondent,
-      document_type: overrides.document_type ?? filters.document_type,
-      tag: overrides.tag ?? filters.tag,
+      created_gte: documentMode ? (overrides.created_gte ?? filters.created_gte) : "",
+      created_lte: documentMode ? (overrides.created_lte ?? filters.created_lte) : "",
+      correspondent: documentMode
+        ? (overrides.correspondent ?? filters.correspondent)
+        : "",
+      document_type: documentMode
+        ? (overrides.document_type ?? filters.document_type)
+        : "",
+      tag: documentMode ? (overrides.tag ?? filters.tag) : "",
       completeness: overrides.completeness ?? filters.completeness,
-      relationship_type: overrides.relationship_type ?? filters.relationship_type,
+      relationship_type: documentMode
+        ? (overrides.relationship_type ?? filters.relationship_type)
+        : "",
     };
     const params = new URLSearchParams();
     if (nextMode !== "documents") params.set("mode", nextMode);
@@ -202,20 +214,26 @@ export function ExplorePage({ session: _session }: Props) {
     if (nextFilters.q.trim()) params.set("q", nextFilters.q.trim());
     if (nextFilters.sort !== "created") params.set("sort", nextFilters.sort);
     if (nextFilters.order !== "desc") params.set("order", nextFilters.order);
-    if (nextFilters.created_gte.trim()) params.set("created_gte", nextFilters.created_gte.trim());
-    if (nextFilters.created_lte.trim()) params.set("created_lte", nextFilters.created_lte.trim());
-    if (nextFilters.correspondent.trim()) {
-      params.set("correspondent", nextFilters.correspondent.trim());
+    if (documentMode) {
+      if (nextFilters.created_gte.trim()) {
+        params.set("created_gte", nextFilters.created_gte.trim());
+      }
+      if (nextFilters.created_lte.trim()) {
+        params.set("created_lte", nextFilters.created_lte.trim());
+      }
+      if (nextFilters.correspondent.trim()) {
+        params.set("correspondent", nextFilters.correspondent.trim());
+      }
+      if (nextFilters.document_type.trim()) {
+        params.set("document_type", nextFilters.document_type.trim());
+      }
+      if (nextFilters.tag.trim()) params.set("tag", nextFilters.tag.trim());
+      if (nextFilters.relationship_type.trim()) {
+        params.set("relationship_type", nextFilters.relationship_type.trim());
+      }
     }
-    if (nextFilters.document_type.trim()) {
-      params.set("document_type", nextFilters.document_type.trim());
-    }
-    if (nextFilters.tag.trim()) params.set("tag", nextFilters.tag.trim());
     if (nextFilters.completeness !== "any") {
       params.set("completeness", nextFilters.completeness);
-    }
-    if (nextFilters.relationship_type.trim()) {
-      params.set("relationship_type", nextFilters.relationship_type.trim());
     }
     setSearchParams(params, { replace: true });
   }
@@ -365,6 +383,7 @@ export function ExplorePage({ session: _session }: Props) {
             <option value="partial">Partial</option>
             <option value="classified">Classified</option>
             <option value="needs_review">Needs review</option>
+            <option value="complete">Complete (legacy)</option>
           </select>
         </div>
         {showDocumentFilters ? (

@@ -70,6 +70,15 @@ def _looks_like_task_id(text: str) -> bool:
     return bool(stripped) and "\n" not in stripped and len(stripped) < 80 and "{" not in stripped
 
 
+def _coerce_document_id(value: Any) -> int | None:
+    if value is None or isinstance(value, (dict, list, bool)):
+        return None
+    text = str(value).strip()
+    if not text.isdigit():
+        return None
+    return int(text)
+
+
 class _DenyRedirects(HTTPRedirectHandler):
     """Refuse redirects so Authorization is never replayed to another origin."""
 
@@ -221,14 +230,12 @@ def smoke_paperless(base: str, fixture: Path, timeout: int) -> int:
         related = row.get("related_document")
         related_ids = row.get("related_document_ids") if isinstance(row.get("related_document_ids"), list) else []
         result_data = row.get("result_data") if isinstance(row.get("result_data"), dict) else {}
-        if related is not None and str(related).isdigit():
-            doc_id = int(related)
-        elif related_ids:
-            doc_id = related_ids[0]
-        elif result_data.get("document_id") is not None:
-            doc_id = result_data.get("document_id")
-        elif result_data.get("duplicate_of") is not None:
-            doc_id = result_data.get("duplicate_of")
+        candidates = [related, *related_ids, result_data.get("document_id"), result_data.get("duplicate_of")]
+        for candidate in candidates:
+            coerced = _coerce_document_id(candidate)
+            if coerced is not None:
+                doc_id = coerced
+                break
         if task_status in {"SUCCESS", "FAILURE"}:
             if task_status == "FAILURE":
                 state = "FAILED"

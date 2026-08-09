@@ -502,6 +502,10 @@ def explore(
     tag: str | None = Query(default=None),
     completeness: str | None = Query(default=None),
     relationship_type: str | None = Query(default=None),
+    person: str | None = Query(default=None),
+    organization: str | None = Query(default=None),
+    country: str | None = Query(default=None),
+    case: str | None = Query(default=None),
     db: Session = Depends(get_db),
     service: DocumentService = Depends(get_ui_service),
 ) -> JSONResponse:
@@ -522,6 +526,10 @@ def explore(
             tag=tag,
             completeness=completeness,
             relationship_type=relationship_type,
+            person=person,
+            organization=organization,
+            country=country,
+            case=case,
         )
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
@@ -1001,6 +1009,7 @@ def _stream_paperless_document(
     headers = {
         "Cache-Control": "no-store",
         "Content-Disposition": f'{disposition}; filename="{safe_name}"',
+        "X-Content-Type-Options": "nosniff",
     }
     return StreamingResponse(chunks, media_type=content_type or "application/octet-stream", headers=headers)
 

@@ -47,6 +47,7 @@ export type EntityDetail = {
   semantic_completeness: string;
   backlinks: Backlink[];
   related_documents: RelatedDocument[];
+  backlinks_truncated?: boolean;
 };
 
 export type DocumentDetail = {
@@ -218,6 +219,10 @@ export type ExploreListParams = {
   tag?: string;
   completeness?: CompletenessFilter;
   relationship_type?: string;
+  person?: string;
+  organization?: string;
+  country?: string;
+  case?: string;
 };
 
 export type EntitySearchHit = {
@@ -440,6 +445,10 @@ export function buildExploreQuery(params: ExploreListParams = {}): string {
   if (params.relationship_type?.trim()) {
     search.set("relationship_type", params.relationship_type.trim());
   }
+  if (params.person?.trim()) search.set("person", params.person.trim());
+  if (params.organization?.trim()) search.set("organization", params.organization.trim());
+  if (params.country?.trim()) search.set("country", params.country.trim());
+  if (params.case?.trim()) search.set("case", params.case.trim());
   return search.toString();
 }
 

@@ -118,7 +118,7 @@ def test_delete_tombstones_and_hides_from_queries(
         entity = db.get(Entity, uuid.UUID(entity_id))
         assert entity is not None
         assert entity.deleted_at is not None
-        assert entity.semantic_completeness in {"empty", "partial", "classified", "needs_review"}
+        assert entity.semantic_completeness == "partial"
     finally:
         db.close()
 
@@ -194,12 +194,61 @@ def test_failed_replace_keeps_old_paperless_document(
     _run_worker(paperless_transport)
 
     job = client.get(f"/ui/api/ingest/jobs/{job_id}").json()
-    assert job["state"] in {"RETRYABLE_FAILURE", "FAILED", "UPLOADING", "PROCESSING"}
+    assert job["state"] == "UPLOADING"
     assert 184 in paperless_transport.documents
     assert 184 not in paperless_transport.deleted_document_ids
     still = client.get("/documents/184", headers=AUTH)
     assert still.status_code == 200
     assert still.json()["entity_id"] == entity_id
+
+
+def test_replace_retries_old_paperless_delete_after_switch(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    csrf = _connect(client)
+    entity_id = _ensure_entity(client)
+    paperless_transport.delete_server_error.add(184)
+
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
+    replace = client.post(
+        "/ui/api/documents/184/replace",
+        headers={"X-CSRF-Token": csrf},
+        files={"document": ("retry-delete.pdf", b"%PDF-retry-delete", "application/pdf")},
+        data={"reason": "retry cleanup"},
+    )
+    assert replace.status_code == 202
+    job_id = replace.json()["id"]
+    _run_worker(paperless_transport)
+
+    mid = client.get(f"/ui/api/ingest/jobs/{job_id}").json()
+    assert mid["state"] != "READY"
+    upload = paperless_transport.uploaded_files[-1]
+    new_id = upload["document_id"]
+    switched = client.get(f"/documents/{new_id}", headers=AUTH)
+    assert switched.status_code == 200
+    assert switched.json()["entity_id"] == entity_id
+    assert 184 not in paperless_transport.deleted_document_ids
+
+    paperless_transport.delete_server_error.discard(184)
+    db = get_session_factory()()
+    try:
+        from atlasdocs.db.models import IngestionJob, utcnow
+
+        job_row = db.get(IngestionJob, uuid.UUID(job_id))
+        assert job_row is not None
+        job_row.next_attempt_at = utcnow()
+        job_row.locked_at = None
+        job_row.locked_by = None
+        db.commit()
+    finally:
+        db.close()
+
+    _run_worker(paperless_transport)
+    finished = client.get(f"/ui/api/ingest/jobs/{job_id}").json()
+    assert finished["state"] == "READY"
+    assert finished["paperless_document_id"] == new_id
+    assert 184 in paperless_transport.deleted_document_ids
+    assert 184 not in paperless_transport.documents
 
 
 def test_new_ingest_creates_new_entity(
@@ -326,6 +375,8 @@ def test_external_ref_switches_only_after_validation(
         job_row = db.get(IngestionJob, uuid.UUID(job_id))
         assert job_row is not None
         job_row.next_attempt_at = utcnow()
+        job_row.locked_at = None
+        job_row.locked_by = None
         db.commit()
     finally:
         db.close()

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, ExternalLink, Eye, FileInput, Link2, Trash2 } from "lucide-react";
 import {
   deleteDocument,
@@ -76,6 +76,14 @@ export function SemanticDocumentDetail({
   const [replaceReason, setReplaceReason] = useState("");
   const [showReplace, setShowReplace] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const deleteTriggerRef = useRef<HTMLButtonElement>(null);
+  const confirmDeleteRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (confirmDelete) {
+      confirmDeleteRef.current?.focus();
+    }
+  }, [confirmDelete]);
 
   async function onRemoveRelationship(relationshipId: string) {
     try {
@@ -100,6 +108,11 @@ export function SemanticDocumentDetail({
     } finally {
       setDeleteBusy(false);
     }
+  }
+
+  function onCancelDelete() {
+    setConfirmDelete(false);
+    deleteTriggerRef.current?.focus();
   }
 
   async function pollReplaceJob(jobId: string) {
@@ -173,6 +186,7 @@ export function SemanticDocumentDetail({
             <FileInput size={16} aria-hidden /> Replace document
           </button>
           <button
+            ref={deleteTriggerRef}
             type="button"
             className="btn btn-danger"
             onClick={() => setConfirmDelete(true)}
@@ -249,6 +263,7 @@ export function SemanticDocumentDetail({
             </p>
             <div className="doc-actions">
               <button
+                ref={confirmDeleteRef}
                 type="button"
                 className="btn btn-danger"
                 disabled={deleteBusy}
@@ -260,7 +275,7 @@ export function SemanticDocumentDetail({
                 type="button"
                 className="btn btn-secondary"
                 disabled={deleteBusy}
-                onClick={() => setConfirmDelete(false)}
+                onClick={onCancelDelete}
               >
                 Cancel
               </button>
@@ -295,6 +310,7 @@ export function SemanticDocumentDetail({
             className="doc-preview-frame"
             src={previewHref}
             title={`Preview of ${documentDisplayTitle(document)}`}
+            sandbox=""
           />
         </section>
         <section className="doc-context-pane">

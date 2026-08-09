@@ -93,7 +93,11 @@ export function App() {
               </Link>
               <Link
                 to="/explore"
-                aria-current={path.startsWith("/explore") ? "page" : undefined}
+                aria-current={
+                  path.startsWith("/explore") || path.startsWith("/entities/")
+                    ? "page"
+                    : undefined
+                }
               >
                 Explore
               </Link>

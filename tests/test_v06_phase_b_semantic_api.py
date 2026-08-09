@@ -175,6 +175,53 @@ def test_explore_documents_and_people(client: TestClient) -> None:
     assert all(row["entity_type"] == "person" for row in people.json()["items"])
 
 
+def test_explore_related_entity_and_relationship_filters(client: TestClient) -> None:
+    created = client.post(
+        "/documents/184/relationships",
+        headers=AUTH,
+        json={"relationship": "concerns-person", "target": "Alice"},
+    )
+    assert created.status_code == 201
+    client.post(
+        "/documents/184/relationships",
+        headers=AUTH,
+        json={"relationship": "source-country", "target": "Germany"},
+    )
+
+    by_person = client.get(
+        "/explore",
+        headers=AUTH,
+        params={"mode": "documents", "person": "Alice"},
+    )
+    assert by_person.status_code == 200
+    assert any(item["paperless_document_id"] == 184 for item in by_person.json()["items"])
+
+    by_country = client.get(
+        "/explore",
+        headers=AUTH,
+        params={"mode": "documents", "country": "Germany"},
+    )
+    assert by_country.status_code == 200
+    assert any(item["paperless_document_id"] == 184 for item in by_country.json()["items"])
+
+    by_rel = client.get(
+        "/explore",
+        headers=AUTH,
+        params={"mode": "documents", "relationship_type": "concerns-person"},
+    )
+    assert by_rel.status_code == 200
+    assert any(item["paperless_document_id"] == 184 for item in by_rel.json()["items"])
+    assert by_rel.json()["has_next"] is False
+
+    missing = client.get(
+        "/explore",
+        headers=AUTH,
+        params={"mode": "documents", "person": "Nobody"},
+    )
+    assert missing.status_code == 200
+    assert missing.json()["items"] == []
+
+
 def test_entity_search_registry_types(client: TestClient) -> None:
     people = client.get(
         "/entities/search",

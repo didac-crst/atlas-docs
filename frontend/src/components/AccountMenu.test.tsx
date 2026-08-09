@@ -28,7 +28,7 @@ describe("AccountMenu", () => {
     expect(onDisconnect).toHaveBeenCalled();
   });
 
-  it("closes on Escape", async () => {
+  it("closes on Escape and restores focus to the trigger", async () => {
     const user = userEvent.setup();
 
     render(
@@ -37,9 +37,11 @@ describe("AccountMenu", () => {
       </MemoryRouter>,
     );
 
-    await user.click(screen.getByRole("button", { name: /^Account$/i }));
+    const trigger = screen.getByRole("button", { name: /^Account$/i });
+    await user.click(trigger);
     expect(screen.getByRole("menu", { name: /Account/i })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu", { name: /Account/i })).toBeNull();
+    expect(trigger).toHaveFocus();
   });
 });

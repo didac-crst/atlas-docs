@@ -176,6 +176,7 @@ def _serialize_entity(entity) -> EntityResponse:
             )
             for item in (getattr(entity, "related_documents", None) or [])
         ],
+        backlinks_truncated=bool(getattr(entity, "backlinks_truncated", False)),
     )
 
 
@@ -620,6 +621,10 @@ def explore(
     tag: str | None = Query(default=None),
     completeness: str | None = Query(default=None),
     relationship_type: str | None = Query(default=None),
+    person: str | None = Query(default=None),
+    organization: str | None = Query(default=None),
+    country: str | None = Query(default=None),
+    case: str | None = Query(default=None),
 ) -> ExplorePageResponse:
     try:
         result = service.explore(
@@ -637,6 +642,10 @@ def explore(
             tag=tag,
             completeness=completeness,
             relationship_type=relationship_type,
+            person=person,
+            organization=organization,
+            country=country,
+            case=case,
         )
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc

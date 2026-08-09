@@ -70,6 +70,7 @@ class EntityResponse(BaseModel):
     semantic_completeness: str = "empty"
     backlinks: list[BacklinkResponse] = Field(default_factory=list)
     related_documents: list[RelatedDocumentResponse] = Field(default_factory=list)
+    backlinks_truncated: bool = False
 
 
 class UnclassifiedDocumentResponse(BaseModel):

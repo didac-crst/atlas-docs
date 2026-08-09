@@ -21,6 +21,8 @@ function completenessLabel(value: string): string {
       return "Classified";
     case "needs_review":
       return "Needs review";
+    case "complete":
+      return "Complete (legacy)";
     default:
       return value;
   }
