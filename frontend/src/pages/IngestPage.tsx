@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { FilePlus2 } from "lucide-react";
 import {
   ApiError,
+  clearCompletedIngestJobs,
   fetchIngestJobs,
   getSession,
   ingestDocument,
@@ -138,6 +139,33 @@ export function IngestPage({ session, onSession }: Props) {
     }
   }
 
+  async function onClearCompleted() {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await clearCompletedIngestJobs(session.csrf_token);
+      setNotice(
+        result.cleared === 0
+          ? "No completed imports to clear"
+          : `Cleared ${result.cleared} completed import${result.cleared === 1 ? "" : "s"} from history`,
+      );
+      onSession(await getSession());
+      await refreshJobs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to clear history");
+      try {
+        onSession(await getSession());
+      } catch {
+        /* ignore */
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const completedCount = jobs.filter((job) => job.state === "READY" || job.state === "FAILED").length;
+
   return (
     <PageLayout width="standard">
     <div className="ingest-layout">
@@ -185,11 +213,26 @@ export function IngestPage({ session, onSession }: Props) {
       </section>
 
       <section className="panel" aria-labelledby="jobs-title">
-        <h1 id="jobs-title">Ingestion jobs</h1>
+        <div className="ingest-history-header">
+          <div>
+            <h1 id="jobs-title">Recent imports</h1>
+            <p className="muted">
+              Your import history for this account. Clearing history does not delete documents.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary atlas-control"
+            disabled={busy || completedCount === 0}
+            onClick={() => void onClearCompleted()}
+          >
+            Clear completed
+          </button>
+        </div>
         {loading && jobs.length === 0 ? (
-          <p role="status">Loading jobs…</p>
+          <p role="status">Loading imports…</p>
         ) : jobs.length === 0 ? (
-          <p className="empty">No ingestion jobs yet.</p>
+          <p className="empty">No recent imports yet.</p>
         ) : (
           <div className="job-table-wrap">
             <table className="job-table">

@@ -1,39 +1,21 @@
-import { Check, Download, Eye } from "lucide-react";
 import { Link } from "react-router-dom";
-import {
-  documentDownloadUrl,
-  type ExploreResultItem,
-} from "../api/client";
+import type { ExploreResultItem } from "../api/client";
 import { documentPreviewUrl } from "../api/client";
 import type { KeyboardEvent, MouseEvent } from "react";
+import { AtlasIcon } from "./atlasIcons";
+import { DocumentActionBar } from "./DocumentActionBar";
+import { DocumentMetaItem } from "./DocumentMetaItem";
+import { toDocumentPresentation } from "./documentPresentation";
 
 type Props = {
   item: ExploreResultItem;
   view: "list" | "grid";
-  /** Prefer opening the in-app preview modal instead of navigating away. */
+  /** Opens the shared document modal (details). */
   onPreview?: (paperlessDocumentId: number, title: string) => void;
-  /** Classify (and other queues): whole-card multi-select. */
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
 };
-
-function completenessLabel(value: string): string {
-  switch (value) {
-    case "empty":
-      return "Empty";
-    case "partial":
-      return "Partial";
-    case "classified":
-      return "Classified";
-    case "needs_review":
-      return "Needs review";
-    case "complete":
-      return "Complete (legacy)";
-    default:
-      return value;
-  }
-}
 
 function typeLabel(entityType: string): string {
   switch (entityType) {
@@ -61,7 +43,7 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
   );
 }
 
-/** Shared document/entity result card for Explore, Classify, search, and relationship picks. */
+/** Shared document/entity result card — compact grid or scan-oriented list. */
 export function DocumentCard({
   item,
   view,
@@ -70,22 +52,18 @@ export function DocumentCard({
   selected = false,
   onToggleSelect,
 }: Props) {
-  const isDocument = item.entity_type === "document" && item.paperless_document_id != null;
+  const doc = toDocumentPresentation(item);
+  const isDocument = item.entity_type === "document" && doc.paperlessDocumentId != null;
   const href = isDocument
-    ? `/documents/${item.paperless_document_id}`
-    : item.id
-      ? `/entities/${item.id}`
+    ? `/documents/${doc.paperlessDocumentId}`
+    : doc.entityId
+      ? `/entities/${doc.entityId}`
       : null;
-  const title = item.label || "Untitled";
-  const documentType = item.document_type;
-  const organization = item.correspondent;
-  const date = item.created_date;
-  const relationshipCount = item.relationship_count ?? item.relationship_summary.length;
-  const showThumb = isDocument && item.thumbnail_available !== false && item.preview_available;
+  const showThumb = isDocument && doc.thumbnailAvailable;
 
-  function openDocument() {
-    if (isDocument && onPreview && item.paperless_document_id != null) {
-      onPreview(item.paperless_document_id, title);
+  function openDetails() {
+    if (isDocument && onPreview && doc.paperlessDocumentId != null) {
+      onPreview(doc.paperlessDocumentId, doc.title);
     }
   }
 
@@ -103,9 +81,120 @@ export function DocumentCard({
     }
   }
 
+  const titleNode =
+    isDocument && onPreview ? (
+      <button
+        type="button"
+        className="doc-card-title doc-card-title-btn"
+        title={doc.title}
+        onClick={(event) => {
+          event.stopPropagation();
+          openDetails();
+        }}
+      >
+        {doc.title}
+      </button>
+    ) : href ? (
+      <Link to={href} className="doc-card-title" title={doc.title}>
+        {doc.title}
+      </Link>
+    ) : (
+      <strong className="doc-card-title" title={doc.title}>
+        {doc.title}
+      </strong>
+    );
+
+  const meta = (
+    <div className="doc-card-meta-row">
+      {doc.correspondent ? (
+        <DocumentMetaItem icon="organization" label="Organization" value={doc.correspondent} />
+      ) : null}
+      {doc.createdDateLabel ? (
+        <DocumentMetaItem icon="date" label="Created date" value={doc.createdDateLabel} />
+      ) : null}
+      {isDocument ? (
+        <DocumentMetaItem
+          icon="relationship"
+          label="Relationships"
+          value={`${doc.relationshipCount} relationship${doc.relationshipCount === 1 ? "" : "s"}`}
+        />
+      ) : (
+        <DocumentMetaItem
+          icon="knowledge"
+          label="Relationships"
+          value={`${doc.relationshipCount} relationship${doc.relationshipCount === 1 ? "" : "s"}`}
+        />
+      )}
+      {!doc.correspondent && !doc.createdDateLabel && item.subtitle ? (
+        <span className="doc-meta-item muted">{item.subtitle}</span>
+      ) : null}
+    </div>
+  );
+
+  if (view === "list") {
+    return (
+      <article
+        className={`doc-card doc-card-list${selected ? " doc-card-selected" : ""}${
+          selectable && isDocument ? " doc-card-selectable" : ""
+        }`}
+        data-entity-type={item.entity_type}
+        aria-selected={selectable && isDocument ? selected : undefined}
+        tabIndex={selectable && isDocument ? 0 : undefined}
+        onClick={onCardClick}
+        onKeyDown={onCardKeyDown}
+      >
+        {selectable && isDocument && selected ? (
+          <span className="doc-card-selected-mark" aria-hidden>
+            <AtlasIcon name="select" size={14} />
+          </span>
+        ) : null}
+
+        {isDocument ? (
+          <div className="doc-card-thumb doc-card-thumb-list" aria-hidden>
+            {showThumb ? (
+              <img src={documentPreviewUrl(doc.paperlessDocumentId!)} alt="" loading="lazy" />
+            ) : (
+              <span className="doc-card-thumb-fallback">
+                <AtlasIcon name="document" size={18} />
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="doc-card-thumb doc-card-thumb-list doc-card-thumb-entity" aria-hidden>
+            <span className="entity-chip" data-kind={item.entity_type}>
+              {typeLabel(item.entity_type)}
+            </span>
+          </div>
+        )}
+
+        <div className="doc-card-main">
+          {titleNode}
+          {meta}
+          {doc.knowledgeContext ? (
+            <p className="doc-card-knowledge muted" title={doc.knowledgeContext}>
+              <AtlasIcon name="knowledge" size={14} />
+              <span>{doc.knowledgeContext}</span>
+            </p>
+          ) : null}
+        </div>
+
+        {isDocument ? (
+          <DocumentActionBar
+            paperlessDocumentId={doc.paperlessDocumentId!}
+            title={doc.title}
+            previewAvailable={doc.previewAvailable}
+            downloadAvailable={doc.downloadAvailable}
+            onDetails={onPreview ? openDetails : undefined}
+            compact
+          />
+        ) : null}
+      </article>
+    );
+  }
+
   return (
     <article
-      className={`doc-card doc-card-${view}${selected ? " doc-card-selected" : ""}${
+      className={`doc-card doc-card-grid${selected ? " doc-card-selected" : ""}${
         selectable && isDocument ? " doc-card-selectable" : ""
       }`}
       data-entity-type={item.entity_type}
@@ -116,116 +205,59 @@ export function DocumentCard({
     >
       {selectable && isDocument && selected ? (
         <span className="doc-card-selected-mark" aria-hidden>
-          <Check size={16} />
+          <AtlasIcon name="select" size={14} />
         </span>
       ) : null}
 
       {isDocument ? (
-        <button
-          type="button"
-          className="doc-card-thumb"
-          aria-label={item.preview_available ? `Preview ${title}` : title}
-          disabled={!item.preview_available && !onPreview}
-          onClick={() => {
-            if (onPreview && item.paperless_document_id != null) {
-              openDocument();
-            }
-          }}
-        >
-          {showThumb ? (
-            <img
-              src={documentPreviewUrl(item.paperless_document_id!)}
-              alt=""
-              loading="lazy"
-            />
-          ) : (
-            <span className="doc-card-thumb-fallback" aria-hidden>
-              PDF
+        <div className="doc-card-preview">
+          {(doc.documentType || typeLabel(item.entity_type)) ? (
+            <span className="entity-chip doc-card-type-pill" data-kind="document">
+              {doc.documentType || typeLabel(item.entity_type)}
             </span>
-          )}
-        </button>
+          ) : null}
+          <button
+            type="button"
+            className="doc-card-thumb"
+            aria-label={`Document details for ${doc.title}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              openDetails();
+            }}
+          >
+            {showThumb ? (
+              <img src={documentPreviewUrl(doc.paperlessDocumentId!)} alt="" loading="lazy" />
+            ) : (
+              <span className="doc-card-thumb-fallback" aria-hidden>
+                <AtlasIcon name="document" size={22} />
+              </span>
+            )}
+          </button>
+        </div>
       ) : (
-        <div className="doc-card-thumb doc-card-thumb-entity" aria-hidden>
-          <span className="entity-chip" data-kind={item.entity_type}>
+        <div className="doc-card-preview">
+          <span className="entity-chip doc-card-type-pill" data-kind={item.entity_type}>
             {typeLabel(item.entity_type)}
           </span>
+          <div className="doc-card-thumb doc-card-thumb-entity" aria-hidden>
+            <AtlasIcon name="knowledge" size={22} />
+          </div>
         </div>
       )}
 
       <div className="doc-card-main">
-        <span className="entity-chip" data-kind={item.entity_type}>
-          {documentType || typeLabel(item.entity_type)}
-        </span>
-        {isDocument && onPreview ? (
-          <button type="button" className="doc-card-title doc-card-title-btn" onClick={openDocument}>
-            {title}
-          </button>
-        ) : href ? (
-          <Link to={href} className="doc-card-title">
-            {title}
-          </Link>
-        ) : (
-          <strong className="doc-card-title">{title}</strong>
-        )}
-        <dl className="doc-card-facts">
-          {documentType ? (
-            <div>
-              <dt>Type</dt>
-              <dd>{documentType}</dd>
-            </div>
-          ) : null}
-          {date ? (
-            <div>
-              <dt>Date</dt>
-              <dd>{date}</dd>
-            </div>
-          ) : null}
-          {organization ? (
-            <div>
-              <dt>Organization</dt>
-              <dd>{organization}</dd>
-            </div>
-          ) : null}
-          {item.subtitle && !documentType && !organization ? (
-            <div>
-              <dt>Context</dt>
-              <dd>{item.subtitle}</dd>
-            </div>
-          ) : null}
-        </dl>
-        <p className="doc-card-meta muted">
-          {relationshipCount} relationship{relationshipCount === 1 ? "" : "s"}
-          {" · "}
-          {completenessLabel(item.semantic_completeness)}
-        </p>
+        {titleNode}
+        {meta}
       </div>
 
       {isDocument ? (
-        <div className="doc-card-actions">
-          {onPreview ? (
-            <button type="button" className="btn btn-secondary" onClick={openDocument}>
-              <Eye size={16} aria-hidden /> Preview
-            </button>
-          ) : item.preview_available ? (
-            <a
-              className="btn btn-secondary"
-              href={documentPreviewUrl(item.paperless_document_id!)}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Eye size={16} aria-hidden /> Preview
-            </a>
-          ) : null}
-          {item.download_available ? (
-            <a
-              className="btn btn-ghost"
-              href={documentDownloadUrl(item.paperless_document_id!)}
-              download
-            >
-              <Download size={16} aria-hidden /> Download
-            </a>
-          ) : null}
-        </div>
+        <DocumentActionBar
+          paperlessDocumentId={doc.paperlessDocumentId!}
+          title={doc.title}
+          previewAvailable={doc.previewAvailable}
+          downloadAvailable={doc.downloadAvailable}
+          onDetails={onPreview ? openDetails : undefined}
+        />
       ) : null}
     </article>
   );

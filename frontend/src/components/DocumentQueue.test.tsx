@@ -66,7 +66,7 @@ describe("Classify collection primitives", () => {
     expect(card).toHaveAttribute("aria-selected", "false");
     await userEvent.click(card);
     expect(onToggle).toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: /^Preview$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^Document details$/i }));
     expect(onPreview).toHaveBeenCalledWith(184, "Payslip Germany");
     expect(onToggle).toHaveBeenCalledTimes(1);
   });

@@ -327,6 +327,23 @@ class IngestionService:
         self._session.flush()
         return _job_view(job)
 
+    def clear_completed_jobs(self, authorization: str) -> int:
+        """Remove completed import history for this token only. Does not delete documents."""
+        fingerprint = token_fingerprint(authorization)
+        rows = self._session.scalars(
+            select(IngestionJob).where(
+                IngestionJob.token_fingerprint == fingerprint,
+                IngestionJob.state.in_(
+                    (IngestionJobState.ready, IngestionJobState.failed)
+                ),
+            )
+        ).all()
+        count = len(rows)
+        for row in rows:
+            self._session.delete(row)
+        self._session.flush()
+        return count
+
 
 class IngestionWorker:
     """Claim and process durable ingestion jobs."""

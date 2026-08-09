@@ -91,7 +91,7 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
     "true",
   );
   await page.getByLabel(/^Search$/i).fill("Ali");
-  await page.getByRole("button", { name: /Apply filters/i }).click();
+  await page.getByRole("button", { name: /^Apply$/i }).click();
   const alice = page.getByRole("link", { name: /^Alice$/i });
   await expect(alice.or(page.getByText(/No results for this Explore query/i))).toBeVisible({
     timeout: 15000,
@@ -112,14 +112,13 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
 
   await page.getByRole("link", { name: /^Classify$/i }).first().click();
   await expect(page.getByRole("heading", { name: /^Classify$/i })).toBeVisible();
-  // Shared e2e server may retain prior classification; use Any so the queue is populated.
+  // Shared e2e server may retain prior classification; open Filters and use Any.
+  await page.getByRole("button", { name: /Filters/i }).click();
   await page.getByLabel(/^Classification$/i).selectOption("any");
-  await page.getByRole("button", { name: /Apply filters/i }).click();
+  await page.getByRole("button", { name: /^Apply$/i }).click();
   await expect(page.getByText(/No unclassified documents|No documents|shown/i).first()).toBeVisible();
 
-  const checkboxes = page.locator('input[type="checkbox"]');
-  await expect(checkboxes.first()).toBeVisible({ timeout: 15000 });
-  await checkboxes.first().check(); // Select page
+  await page.getByRole("button", { name: /Select visible/i }).click();
   await expect(page.getByRole("region", { name: /Batch actions/i })).toBeVisible();
   await page.getByRole("button", { name: /Add relationship/i }).click();
   await expect(page.getByRole("dialog")).toBeVisible();

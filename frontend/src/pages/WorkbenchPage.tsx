@@ -22,7 +22,9 @@ import { ClassifyBatchBar } from "../components/ClassifyBatchBar";
 import { Dialog } from "../components/Dialog";
 import { DocumentCard } from "../components/DocumentCard";
 import { DocumentModal } from "../components/DocumentModal";
+import { FilterChips } from "../components/FilterChips";
 import { PageLayout } from "../components/PageLayout";
+import { AtlasIcon } from "../components/atlasIcons";
 
 export type QueueFilters = {
   q: string;
@@ -156,6 +158,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     setDraft(filters);
@@ -298,6 +301,63 @@ export function WorkbenchPage({ session, onSession }: Props) {
     setSelected(allSelected ? new Set() : new Set(ids));
   }
 
+  const allVisibleSelected =
+    Boolean(queue) &&
+    queue!.items.length > 0 &&
+    queue!.items.every((item) => selected.has(item.paperless_document_id));
+
+  const activeChips = useMemo(() => {
+    const chips: { id: string; label: string }[] = [];
+    if (filters.q.trim()) chips.push({ id: "q", label: filters.q.trim() });
+    if (filters.correspondent.trim()) {
+      chips.push({ id: "correspondent", label: filters.correspondent.trim() });
+    }
+    if (filters.document_type.trim()) {
+      chips.push({ id: "document_type", label: filters.document_type.trim() });
+    }
+    if (filters.tag.trim()) chips.push({ id: "tag", label: `Tag: ${filters.tag.trim()}` });
+    if (filters.created_gte.trim()) {
+      chips.push({ id: "created_gte", label: `From ${filters.created_gte}` });
+    }
+    if (filters.created_lte.trim()) {
+      chips.push({ id: "created_lte", label: `To ${filters.created_lte}` });
+    }
+    if (filters.classification !== "unclassified") {
+      chips.push({ id: "classification", label: `Classification: ${filters.classification}` });
+    }
+    if (filters.completeness !== "any") {
+      chips.push({ id: "completeness", label: `Completeness: ${filters.completeness}` });
+    }
+    return chips;
+  }, [filters]);
+
+  function removeChip(id: string) {
+    const next: Partial<QueueFilters> & { page?: number } = { page: 1 };
+    if (id === "q") next.q = "";
+    if (id === "correspondent") next.correspondent = "";
+    if (id === "document_type") next.document_type = "";
+    if (id === "tag") next.tag = "";
+    if (id === "created_gte") next.created_gte = "";
+    if (id === "created_lte") next.created_lte = "";
+    if (id === "classification") next.classification = "unclassified";
+    if (id === "completeness") next.completeness = "any";
+    writeParams({ ...filters, ...next });
+  }
+
+  function clearAllFilters() {
+    writeParams({
+      q: "",
+      correspondent: "",
+      document_type: "",
+      tag: "",
+      created_gte: "",
+      created_lte: "",
+      classification: "unclassified",
+      completeness: "any",
+      page: 1,
+    });
+  }
+
   function onApplyFilters(event: FormEvent) {
     event.preventDefault();
     writeParams({ ...draft, page: 1 });
@@ -378,113 +438,160 @@ export function WorkbenchPage({ session, onSession }: Props) {
 
         <p className="muted classify-queue-label">{panelTitle}</p>
 
-        <form className="explore-filters" onSubmit={onApplyFilters}>
-          <div className="field">
-            <label htmlFor="classify-q">Search</label>
-            <input
-              id="classify-q"
-              value={draft.q}
-              onChange={(event) => setDraft({ ...draft, q: event.target.value })}
-              placeholder="Title or text"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="classify-created-gte">Created from</label>
-            <input
-              id="classify-created-gte"
-              type="date"
-              value={draft.created_gte}
-              onChange={(event) => setDraft({ ...draft, created_gte: event.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="classify-created-lte">Created to</label>
-            <input
-              id="classify-created-lte"
-              type="date"
-              value={draft.created_lte}
-              onChange={(event) => setDraft({ ...draft, created_lte: event.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="classify-correspondent">Correspondent</label>
-            <input
-              id="classify-correspondent"
-              value={draft.correspondent}
-              onChange={(event) => setDraft({ ...draft, correspondent: event.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="classify-document-type">Document type</label>
-            <input
-              id="classify-document-type"
-              value={draft.document_type}
-              onChange={(event) => setDraft({ ...draft, document_type: event.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="classify-tag">Tag</label>
-            <input
-              id="classify-tag"
-              value={draft.tag}
-              onChange={(event) => setDraft({ ...draft, tag: event.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="classify-classification">Classification</label>
-            <select
-              id="classify-classification"
-              value={draft.classification}
-              onChange={(event) =>
-                setDraft({
-                  ...draft,
-                  classification: event.target.value as ClassificationFilter,
-                })
-              }
+        <form className="explore-filter-shell" onSubmit={onApplyFilters}>
+          <div className="explore-filter-primary">
+            <div className="field field-grow">
+              <label htmlFor="classify-q" className="sr-only">
+                Search
+              </label>
+              <div className="atlas-search">
+                <AtlasIcon name="search" size={16} />
+                <input
+                  id="classify-q"
+                  className="atlas-control"
+                  value={draft.q}
+                  onChange={(event) => setDraft({ ...draft, q: event.target.value })}
+                  placeholder="Search title, metadata or document text…"
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary atlas-control"
+              aria-expanded={filtersOpen}
+              onClick={() => setFiltersOpen((value) => !value)}
             >
-              <option value="unclassified">Unclassified</option>
-              <option value="classified">Classified</option>
-              <option value="any">Any</option>
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="classify-completeness">Completeness</label>
-            <select
-              id="classify-completeness"
-              value={draft.completeness}
-              onChange={(event) =>
-                setDraft({
-                  ...draft,
-                  completeness: event.target.value as CompletenessFilter,
-                })
-              }
-            >
-              <option value="any">Any</option>
-              <option value="empty">Empty</option>
-              <option value="partial">Partial</option>
-              <option value="classified">Classified</option>
-              <option value="needs_review">Needs review</option>
-              <option value="complete">Complete (legacy)</option>
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="classify-sort">Sort</label>
-            <select
-              id="classify-sort"
-              value={sortPreset(filters.sort, filters.order)}
-              onChange={(event) => onSortPreset(event.target.value)}
-            >
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-              <option value="title">Title</option>
-              <option value="correspondent">Correspondent</option>
-            </select>
-          </div>
-          <div className="field explore-filters-actions">
-            <button type="submit" className="btn btn-primary">
-              Apply filters
+              <AtlasIcon name="filters" size={16} /> Filters
+              {activeChips.length > 0 ? ` (${activeChips.length})` : ""}
+            </button>
+            <div className="field">
+              <label htmlFor="classify-sort" className="sr-only">
+                Sort
+              </label>
+              <select
+                id="classify-sort"
+                className="atlas-control"
+                value={sortPreset(filters.sort, filters.order)}
+                onChange={(event) => onSortPreset(event.target.value)}
+              >
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="title">Title</option>
+                <option value="correspondent">Correspondent</option>
+              </select>
+            </div>
+            <button type="submit" className="btn btn-primary atlas-control">
+              Apply
             </button>
           </div>
+
+          <FilterChips chips={activeChips} onRemove={removeChip} onClearAll={clearAllFilters} />
+
+          {filtersOpen ? (
+            <div className="explore-filter-panel">
+              <fieldset className="explore-filter-group">
+                <legend>Classification</legend>
+                <div className="explore-filter-grid">
+                  <div className="field">
+                    <label htmlFor="classify-classification">Classification</label>
+                    <select
+                      id="classify-classification"
+                      className="atlas-control"
+                      value={draft.classification}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          classification: event.target.value as ClassificationFilter,
+                        })
+                      }
+                    >
+                      <option value="unclassified">Unclassified</option>
+                      <option value="classified">Classified</option>
+                      <option value="any">Any</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="classify-completeness">Completeness</label>
+                    <select
+                      id="classify-completeness"
+                      className="atlas-control"
+                      value={draft.completeness}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          completeness: event.target.value as CompletenessFilter,
+                        })
+                      }
+                    >
+                      <option value="any">Any</option>
+                      <option value="empty">Empty</option>
+                      <option value="partial">Partial</option>
+                      <option value="classified">Classified</option>
+                      <option value="needs_review">Needs review</option>
+                      <option value="complete">Complete (legacy)</option>
+                    </select>
+                  </div>
+                </div>
+              </fieldset>
+              <fieldset className="explore-filter-group">
+                <legend>Document</legend>
+                <div className="explore-filter-grid">
+                  <div className="field">
+                    <label htmlFor="classify-document-type">Document type</label>
+                    <input
+                      id="classify-document-type"
+                      className="atlas-control"
+                      value={draft.document_type}
+                      onChange={(event) => setDraft({ ...draft, document_type: event.target.value })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="classify-correspondent">Correspondent</label>
+                    <input
+                      id="classify-correspondent"
+                      className="atlas-control"
+                      value={draft.correspondent}
+                      onChange={(event) => setDraft({ ...draft, correspondent: event.target.value })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="classify-tag">Tag</label>
+                    <input
+                      id="classify-tag"
+                      className="atlas-control"
+                      value={draft.tag}
+                      onChange={(event) => setDraft({ ...draft, tag: event.target.value })}
+                    />
+                  </div>
+                </div>
+              </fieldset>
+              <fieldset className="explore-filter-group">
+                <legend>Date</legend>
+                <div className="explore-filter-grid">
+                  <div className="field">
+                    <label htmlFor="classify-created-gte">Created from</label>
+                    <input
+                      id="classify-created-gte"
+                      className="atlas-control"
+                      type="date"
+                      value={draft.created_gte}
+                      onChange={(event) => setDraft({ ...draft, created_gte: event.target.value })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="classify-created-lte">Created to</label>
+                    <input
+                      id="classify-created-lte"
+                      className="atlas-control"
+                      type="date"
+                      value={draft.created_lte}
+                      onChange={(event) => setDraft({ ...draft, created_lte: event.target.value })}
+                    />
+                  </div>
+                </div>
+              </fieldset>
+            </div>
+          ) : null}
         </form>
 
         <ClassifyBatchBar
@@ -502,21 +609,22 @@ export function WorkbenchPage({ session, onSession }: Props) {
         {queue ? (
           <>
             <div className="classify-select-bar">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={
-                    queue.items.length > 0 &&
-                    queue.items.every((item) => selected.has(item.paperless_document_id))
-                  }
-                  onChange={toggleAll}
+              {allVisibleSelected ? (
+                <button type="button" className="btn btn-secondary atlas-control" onClick={toggleAll}>
+                  {selected.size} selected · Clear selection
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary atlas-control"
+                  onClick={toggleAll}
                   disabled={queue.items.length === 0}
-                />{" "}
-                Select page
-              </label>
+                >
+                  Select visible
+                </button>
+              )}
               <span className="muted" style={{ fontVariantNumeric: "tabular-nums" }}>
                 Page {queue.page} · {queue.items.length} shown · {queue.paperless_count} total
-                {selected.size > 0 ? ` · ${selected.size} selected` : ""}
               </span>
             </div>
 

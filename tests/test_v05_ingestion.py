@@ -379,3 +379,65 @@ def test_processing_timeout_ignores_queue_delay(
         assert job.error_code == "processing_timeout"
     finally:
         db.close()
+
+
+def test_clear_completed_ingest_jobs_is_token_scoped(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    _connect(client, token="owner-token")
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
+    upload = client.post(
+        "/ui/api/ingest",
+        headers={"X-CSRF-Token": csrf},
+        files={"document": ("keep.pdf", b"%PDF-owner", "application/pdf")},
+    )
+    assert upload.status_code == 202
+    owner_job_id = upload.json()["id"]
+
+    db = get_session_factory()()
+    try:
+        worker = IngestionWorker(
+            db,
+            PaperlessClient(base_url="http://paperless.test", transport=paperless_transport),
+        )
+        assert worker.run_once() is True
+        owner_job = db.get(IngestionJob, uuid.UUID(owner_job_id))
+        assert owner_job is not None
+        assert owner_job.state == IngestionJobState.ready
+        paperless_doc_id = owner_job.paperless_document_id
+
+        other = IngestionJob(
+            id=uuid.uuid4(),
+            state=IngestionJobState.ready,
+            original_filename="other.pdf",
+            content_sha256="a" * 64,
+            content_size_bytes=12,
+            token_fingerprint=token_fingerprint("Token stranger"),
+            paperless_document_id=999001,
+        )
+        db.add(other)
+        db.commit()
+        other_id = other.id
+    finally:
+        db.close()
+
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
+    cleared = client.post(
+        "/ui/api/ingest/jobs/clear-completed",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["cleared"] == 1
+
+    listed = client.get("/ui/api/ingest/jobs")
+    assert listed.status_code == 200
+    assert listed.json()["items"] == []
+
+    db = get_session_factory()()
+    try:
+        assert db.get(IngestionJob, uuid.UUID(owner_job_id)) is None
+        assert db.get(IngestionJob, other_id) is not None
+        # Clearing history must not delete the Paperless document id we recorded.
+        assert paperless_doc_id is not None
+    finally:
+        db.close()

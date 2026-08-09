@@ -22,22 +22,27 @@ const docItem = {
 };
 
 describe("ExploreResultCard", () => {
-  it("opens documents via title button when onPreview is provided", () => {
+  it("shows compact glyph actions and metadata without Type/Date labels", () => {
     const onPreview = vi.fn();
     render(
       <MemoryRouter>
-        <ExploreResultCard item={docItem} view="list" onPreview={onPreview} />
+        <ExploreResultCard item={docItem} view="grid" onPreview={onPreview} />
       </MemoryRouter>,
     );
     expect(screen.getByRole("button", { name: /^Payslip Germany$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Preview$/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /^Download$/ })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /^Document details$/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open preview in new tab/i })).toHaveAttribute(
+      "href",
+      "/ui/api/documents/184/preview",
+    );
+    expect(screen.getByRole("link", { name: /Download Payslip Germany/i })).toHaveAttribute(
       "href",
       "/ui/api/documents/184/download",
     );
-    expect(screen.getByText(/Payslip/i, { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText(/Acme Payroll/i)).toBeInTheDocument();
+    expect(screen.getByText(/Jan 2024/i)).toBeInTheDocument();
     expect(screen.getByText(/2 relationships/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Type$/i)).toBeNull();
     expect(screen.queryByText("184")).toBeNull();
   });
 
@@ -47,11 +52,12 @@ describe("ExploreResultCard", () => {
         <ExploreResultCard item={docItem} view="list" />
       </MemoryRouter>,
     );
-    expect(screen.getByRole("link", { name: /Payslip Germany/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /^Payslip Germany$/i })).toHaveAttribute(
       "href",
       "/documents/184",
     );
   });
+
   it("renders non-document entities with entity detail links", () => {
     render(
       <MemoryRouter>
@@ -81,6 +87,6 @@ describe("ExploreResultCard", () => {
     );
     expect(screen.getAllByText(/^Person$/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/1 relationship/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Preview$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Document details$/i })).toBeNull();
   });
 });
