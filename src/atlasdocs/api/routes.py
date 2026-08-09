@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from atlasdocs.api.schemas import (
@@ -159,6 +159,7 @@ def _serialize_job(job) -> IngestionJobResponse:
         error_message=job.error_message,
         original_filename=job.original_filename,
         content_sha256=job.content_sha256,
+        user_title=getattr(job, "user_title", None),
     )
 
 
@@ -274,6 +275,7 @@ def bulk_document_relationships(
 @router.post("/ingest", response_model=IngestionJobResponse, status_code=status.HTTP_202_ACCEPTED)
 def ingest_document(
     document: UploadFile = File(...),
+    title: str | None = Form(default=None),
     authorization: str = Depends(require_authorization),
     service: IngestionService = Depends(get_ingest_service),
 ) -> IngestionJobResponse:
@@ -283,6 +285,7 @@ def ingest_document(
             filename=document.filename or "upload.bin",
             file_obj=document.file,
             content_type=document.content_type or "application/octet-stream",
+            title=title,
         )
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc

@@ -79,14 +79,6 @@ export function SemanticDocumentDetail({
         </h1>
         {context ? <p className="doc-context">{context}</p> : null}
         <div className="doc-actions">
-          <a
-            className="btn btn-primary"
-            href={previewHref}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Eye size={16} aria-hidden /> Preview
-          </a>
           <a className="btn btn-secondary" href={downloadHref} download>
             <Download size={16} aria-hidden /> Download
           </a>
@@ -99,6 +91,14 @@ export function SemanticDocumentDetail({
               <Link2 size={16} aria-hidden /> Add relationship
             </a>
           )}
+          <a
+            className="btn btn-ghost"
+            href={previewHref}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Eye size={16} aria-hidden /> Open preview in new tab
+          </a>
           {document.open_url ? (
             <a
               href={document.open_url}
@@ -141,32 +141,43 @@ export function SemanticDocumentDetail({
         </details>
       </header>
 
-      <h2>Relationships</h2>
-      {document.relationships.length === 0 ? (
-        <p className="empty">No relationships yet. Assign a typed concept below.</p>
-      ) : (
-        <ul className="rel-list">
-          {document.relationships.map((rel) => (
-            <li key={rel.id} className="rel-item">
-              <div>
-                <strong>{rel.type}</strong>{" "}
-                <EntityReference label={rel.target} relationshipType={rel.type} />
-                <div className="meta muted">
-                  Provenance: {rel.origin} · Status: {rel.status}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="btn btn-danger"
-                onClick={() => onDelete(rel.id)}
-                aria-label={`Remove ${rel.type} ${rel.target}`}
-              >
-                <Trash2 size={16} aria-hidden /> Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="doc-detail-layout">
+        <section className="doc-preview-pane" aria-label="Document preview">
+          <iframe
+            className="doc-preview-frame"
+            src={previewHref}
+            title={`Preview of ${documentDisplayTitle(document)}`}
+          />
+        </section>
+        <section className="doc-context-pane">
+          <h2>Relationships</h2>
+          {document.relationships.length === 0 ? (
+            <p className="empty">No relationships yet. Assign a typed concept below.</p>
+          ) : (
+            <ul className="rel-list">
+              {document.relationships.map((rel) => (
+                <li key={rel.id} className="rel-item">
+                  <div>
+                    <strong>{rel.type}</strong>{" "}
+                    <EntityReference label={rel.target} relationshipType={rel.type} />
+                    <div className="meta muted">
+                      Provenance: {rel.origin} · Status: {rel.status}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={() => onDelete(rel.id)}
+                    aria-label={`Remove ${rel.type} ${rel.target}`}
+                  >
+                    <Trash2 size={16} aria-hidden /> Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

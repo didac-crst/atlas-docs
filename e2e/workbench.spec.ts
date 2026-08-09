@@ -70,8 +70,10 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   const detail = page.locator(".detail-panel");
   await expect(detail.getByRole("heading", { name: /Payslip Germany/i })).toBeVisible();
 
-  const preview = detail.getByRole("link", { name: /^Preview$/i });
-  await expect(preview).toHaveAttribute("href", /\/ui\/api\/documents\/184\/preview$/);
+  const previewFrame = detail.locator("iframe.doc-preview-frame");
+  await expect(previewFrame).toHaveAttribute("src", /\/ui\/api\/documents\/184\/preview$/);
+  const openPreview = detail.getByRole("link", { name: /Open preview in new tab/i });
+  await expect(openPreview).toHaveAttribute("href", /\/ui\/api\/documents\/184\/preview$/);
   const download = detail.getByRole("link", { name: /^Download$/i });
   await expect(download).toHaveAttribute("href", /\/ui\/api\/documents\/184\/download$/);
   const paperless = detail.getByRole("link", { name: /Open original in Paperless/i });

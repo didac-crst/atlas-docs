@@ -58,6 +58,7 @@ class IngestionJobView:
     error_message: str | None
     original_filename: str
     content_sha256: str
+    user_title: str | None = None
 
 
 def spool_dir() -> Path:
@@ -79,6 +80,16 @@ def _safe_basename(filename: str | None) -> str:
     return name[:512]
 
 
+def _normalize_user_title(title: str | None) -> str | None:
+    """Optional Paperless title. Never invent atlasdocs: UUID titles."""
+    if title is None:
+        return None
+    cleaned = " ".join(str(title).split()).strip()
+    if not cleaned:
+        return None
+    return cleaned[:512]
+
+
 def _job_view(job: IngestionJob) -> IngestionJobView:
     return IngestionJobView(
         id=str(job.id),
@@ -91,6 +102,7 @@ def _job_view(job: IngestionJob) -> IngestionJobView:
         error_message=job.error_message,
         original_filename=job.original_filename,
         content_sha256=job.content_sha256,
+        user_title=job.user_title,
     )
 
 
@@ -114,6 +126,7 @@ class IngestionService:
         filename: str,
         file_obj,
         content_type: str = "application/octet-stream",
+        title: str | None = None,
         session_id: str | None = None,
         created_by_label: str | None = None,
     ) -> IngestionJobView:
@@ -124,6 +137,7 @@ class IngestionService:
         path = spool_path_for(job_id)
         digest = hashlib.sha256()
         size = 0
+        user_title = _normalize_user_title(title)
         try:
             with path.open("wb") as out:
                 while True:
@@ -157,8 +171,11 @@ class IngestionService:
                 ),
                 token_fingerprint=fingerprint,
                 original_filename=_safe_basename(filename),
+                user_title=user_title,
                 content_sha256=sha,
                 content_size_bytes=size,
+                # Internal Atlas correlation only — never sent as Paperless title.
+                correlation_key=correlation_key_for(job_id),
                 attempt_count=0,
                 next_attempt_at=utcnow(),
             )
@@ -434,17 +451,19 @@ class IngestionWorker:
             return
 
         job.attempt_count += 1
-        correlation = correlation_key_for(job.id)
+        # Optional user title only. Never post atlasdocs:{uuid} as Paperless title.
+        paperless_title = _normalize_user_title(job.user_title)
         try:
             with path.open("rb") as handle:
                 task_id = self._paperless.post_document(
                     authorization,
                     filename=job.original_filename,
                     content=handle,
-                    title=correlation,
+                    title=paperless_title,
                 )
             job.paperless_task_id = task_id
-            job.correlation_key = correlation
+            if job.correlation_key is None:
+                job.correlation_key = correlation_key_for(job.id)
             job.state = IngestionJobState.processing
             if job.processing_started_at is None:
                 job.processing_started_at = utcnow()
@@ -570,16 +589,13 @@ class IngestionWorker:
             )
             return
 
-        correlation = job.correlation_key or correlation_key_for(job.id)
+        # Task payload document ids only. Do not correlate via Paperless title:
+        # AtlasDocs never writes atlasdocs:{uuid} into user-facing titles.
         doc_id: int | None = None
 
         try:
             status = self._paperless.get_task(job.paperless_task_id, authorization)
             doc_id = self._paperless.primary_document_id(status)
-            if doc_id is None:
-                doc_id = self._paperless.find_document_id_by_correlation_title(
-                    authorization, correlation
-                )
         except PaperlessAuthError:
             self._fail_terminal(job, "paperless_unauthorized", "Paperless authorization failed")
             return

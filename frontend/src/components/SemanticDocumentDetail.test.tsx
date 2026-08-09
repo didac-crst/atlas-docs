@@ -72,7 +72,7 @@ describe("SemanticDocumentDetail helpers", () => {
 });
 
 describe("SemanticDocumentDetail document actions", () => {
-  it("renders preview, download, and advanced Paperless actions", () => {
+  it("renders inline preview, download, and advanced Paperless actions", () => {
     render(
       <SemanticDocumentDetail
         document={{ ...baseDoc, open_url: "https://docs.example.test/documents/184/" }}
@@ -81,10 +81,14 @@ describe("SemanticDocumentDetail document actions", () => {
         onError={vi.fn()}
       />,
     );
-    const preview = screen.getByRole("link", { name: /^Preview$/i });
-    expect(preview).toHaveAttribute("href", "/ui/api/documents/184/preview");
-    expect(preview).toHaveAttribute("target", "_blank");
-    expect(preview).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    const frame = document.querySelector("iframe.doc-preview-frame");
+    expect(frame).not.toBeNull();
+    expect(frame).toHaveAttribute("src", "/ui/api/documents/184/preview");
+    expect(frame).toHaveAttribute("title", "Preview of Payslip Germany");
+
+    const openTab = screen.getByRole("link", { name: /Open preview in new tab/i });
+    expect(openTab).toHaveAttribute("href", "/ui/api/documents/184/preview");
+    expect(openTab).toHaveAttribute("target", "_blank");
 
     const download = screen.getByRole("link", { name: /^Download$/i });
     expect(download).toHaveAttribute("href", "/ui/api/documents/184/download");
@@ -109,7 +113,7 @@ describe("SemanticDocumentDetail document actions", () => {
     const button = screen.getByRole("button", { name: /Open original in Paperless/i });
     expect(button).toBeDisabled();
     expect(screen.queryByRole("link", { name: /Open original in Paperless/i })).toBeNull();
-    expect(screen.getByRole("link", { name: /^Preview$/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open preview in new tab/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^Download$/i })).toBeInTheDocument();
   });
 

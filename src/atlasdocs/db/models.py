@@ -277,6 +277,7 @@ class IngestionJob(Base):
     token_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     token_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    user_title: Mapped[str | None] = mapped_column(String(512), nullable=True)
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     content_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     paperless_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True)

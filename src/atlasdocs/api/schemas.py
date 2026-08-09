@@ -98,6 +98,7 @@ class IngestionJobResponse(BaseModel):
     error_message: str | None = None
     original_filename: str | None = None
     content_sha256: str | None = None
+    user_title: str | None = None
 
 
 class IngestionJobsResponse(BaseModel):

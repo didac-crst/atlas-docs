@@ -9,6 +9,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     Header,
     HTTPException,
     Query,
@@ -218,6 +219,7 @@ def _serialize_job(job) -> IngestionJobResponse:
         error_message=job.error_message,
         original_filename=job.original_filename,
         content_sha256=job.content_sha256,
+        user_title=getattr(job, "user_title", None),
     )
 
 
@@ -661,6 +663,7 @@ def search_concepts(
 def ingest_upload(
     request: Request,
     document: UploadFile = File(...),
+    title: str | None = Form(default=None),
     x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
     db: Session = Depends(get_db),
     service: IngestionService = Depends(get_ui_ingest_service),
@@ -674,6 +677,7 @@ def ingest_upload(
             filename=document.filename or "upload.bin",
             file_obj=document.file,
             content_type=document.content_type or "application/octet-stream",
+            title=title,
             session_id=ui_session.id,
             created_by_label=ui_session.username_label,
         )

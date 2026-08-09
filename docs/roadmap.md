@@ -30,13 +30,13 @@ Contract: [v0.6 Explore and Semantic Workbench](v0.6-explore-semantic-workbench.
 
 Phases (summary):
 
-| Phase | Focus |
-| --- | --- |
-| A | Document experience: optional titles (no `atlasdocs:` UUID titles), inline preview |
-| B | Semantic API: entity search, type registry, relationship constraints, completeness |
-| C | Explore UI: nav, search/filters/sort/pagination, list/grid |
-| D | Entity detail foundation and related context |
-| E | Home launcher; move Reconcile/Disconnect out of primary nav; validation |
+| Phase | Focus | Status |
+| --- | --- | --- |
+| A | Document experience: optional titles (no `atlasdocs:` UUID titles), inline preview | Done |
+| B | Semantic API: entity search, type registry, relationship constraints, completeness | |
+| C | Explore UI: nav, search/filters/sort/pagination, list/grid | |
+| D | Entity detail foundation and related context | |
+| E | Home launcher; move Reconcile/Disconnect out of primary nav; validation | |
 
 Also in scope for v0.6: document delete/replace via Paperless (failure-safe),
 and creation-time semantic completeness states (`empty` / `partial` /

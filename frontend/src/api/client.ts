@@ -146,6 +146,7 @@ export type IngestJob = {
   error_message: string | null;
   original_filename: string | null;
   content_sha256: string | null;
+  user_title?: string | null;
 };
 
 export type IngestJobsPage = {

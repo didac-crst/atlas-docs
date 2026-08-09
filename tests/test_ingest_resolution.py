@@ -118,13 +118,61 @@ def test_task_success_without_id_enters_resolving_document(
         db.close()
 
 
-def test_resolving_document_finds_doc_by_correlation_title(
+def test_upload_omits_paperless_title_by_default(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    _connect(client)
+    job_id = _enqueue(client)
+    db = get_session_factory()()
+    try:
+        worker = _worker(db, paperless_transport)
+        assert worker.run_once() is True
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        assert job.state == IngestionJobState.ready
+        upload = paperless_transport.uploaded_files[-1]
+        assert upload["title"] is None
+        assert not str(upload.get("title") or "").startswith("atlasdocs:")
+        assert job.user_title is None
+        assert job.correlation_key == correlation_key_for(job_id)
+    finally:
+        db.close()
+
+
+def test_upload_preserves_user_supplied_title(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    _connect(client)
+    csrf = client.get("/ui/api/session").json()["csrf_token"]
+    upload = client.post(
+        "/ui/api/ingest",
+        headers={"X-CSRF-Token": csrf},
+        data={"title": "  Quarterly invoice  "},
+        files={"document": ("note.pdf", b"%PDF-hello", "application/pdf")},
+    )
+    assert upload.status_code == 202
+    job_id = uuid.UUID(upload.json()["id"])
+    assert upload.json()["user_title"] == "Quarterly invoice"
+    db = get_session_factory()()
+    try:
+        worker = _worker(db, paperless_transport)
+        assert worker.run_once() is True
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        assert job.state == IngestionJobState.ready
+        assert job.user_title == "Quarterly invoice"
+        assert paperless_transport.uploaded_files[-1]["title"] == "Quarterly invoice"
+        assert not str(paperless_transport.uploaded_files[-1]["title"]).startswith("atlasdocs:")
+    finally:
+        db.close()
+
+
+def test_resolving_without_task_document_id_does_not_use_title_guess(
     client: TestClient, paperless_transport: FakePaperlessTransport
 ) -> None:
     paperless_transport.omit_related_document_on_success = True
     _connect(client)
     job_id = _enqueue(client)
-    correlation = correlation_key_for(job_id)
     db = get_session_factory()()
     try:
         worker = _worker(db, paperless_transport)
@@ -133,10 +181,41 @@ def test_resolving_document_finds_doc_by_correlation_title(
         assert job is not None
         assert job.state == IngestionJobState.resolving_document
 
-        # Simulate Paperless indexing the document under the correlation title.
+        # Even if a document happens to share the internal correlation key as title,
+        # AtlasDocs must not bind via title search anymore.
+        upload = paperless_transport.uploaded_files[-1]
+        paperless_transport.documents[upload["document_id"]]["title"] = correlation_key_for(job_id)
+        job.next_attempt_at = utcnow() - timedelta(seconds=1)
+        job.locked_at = None
+        job.locked_by = None
+        db.commit()
+
+        assert worker.run_once() is True
+        db.refresh(job)
+        assert job.state == IngestionJobState.resolving_document
+        assert job.paperless_document_id is None
+        assert spool_path_for(job_id).exists()
+    finally:
+        db.close()
+
+
+def test_resolving_binds_when_task_later_exposes_document_id(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    paperless_transport.omit_related_document_on_success = True
+    _connect(client)
+    job_id = _enqueue(client)
+    db = get_session_factory()()
+    try:
+        worker = _worker(db, paperless_transport)
+        assert worker.run_once() is True
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        assert job.state == IngestionJobState.resolving_document
         upload = paperless_transport.uploaded_files[-1]
         doc_id = upload["document_id"]
-        paperless_transport.documents[doc_id]["title"] = correlation
+        paperless_transport.tasks[job.paperless_task_id]["related_document_ids"] = [doc_id]
+        paperless_transport.tasks[job.paperless_task_id]["result_data"] = {"document_id": doc_id}
         job.next_attempt_at = utcnow() - timedelta(seconds=1)
         job.locked_at = None
         job.locked_by = None
@@ -147,91 +226,6 @@ def test_resolving_document_finds_doc_by_correlation_title(
         assert job.state == IngestionJobState.ready
         assert job.paperless_document_id == doc_id
         assert not spool_path_for(job_id).exists()
-        entity = db.get(Entity, job.entity_id)
-        assert entity is not None
-    finally:
-        db.close()
-
-
-def test_resolving_zero_title_matches_keeps_resolving(
-    client: TestClient, paperless_transport: FakePaperlessTransport
-) -> None:
-    paperless_transport.omit_related_document_on_success = True
-    _connect(client)
-    job_id = _enqueue(client)
-    db = get_session_factory()()
-    try:
-        worker = _worker(db, paperless_transport)
-        assert worker.run_once() is True
-        job = db.get(IngestionJob, job_id)
-        assert job is not None
-        assert job.state == IngestionJobState.resolving_document
-        # Leave document titled as filename (no exact correlation match).
-        job.next_attempt_at = utcnow() - timedelta(seconds=1)
-        job.locked_at = None
-        job.locked_by = None
-        db.commit()
-        assert worker.run_once() is True
-        db.refresh(job)
-        assert job.state == IngestionJobState.resolving_document
-        assert job.paperless_document_id is None
-        assert spool_path_for(job_id).exists()
-        assert job.token_ciphertext
-    finally:
-        db.close()
-
-
-def test_resolving_multiple_exact_title_matches_does_not_guess(
-    client: TestClient, paperless_transport: FakePaperlessTransport
-) -> None:
-    paperless_transport.omit_related_document_on_success = True
-    _connect(client)
-    job_id = _enqueue(client)
-    correlation = correlation_key_for(job_id)
-    db = get_session_factory()()
-    try:
-        worker = _worker(db, paperless_transport)
-        assert worker.run_once() is True
-        job = db.get(IngestionJob, job_id)
-        assert job is not None
-        upload = paperless_transport.uploaded_files[-1]
-        paperless_transport.documents[upload["document_id"]]["title"] = correlation
-        paperless_transport.documents[8801] = {"id": 8801, "title": correlation}
-        job.next_attempt_at = utcnow() - timedelta(seconds=1)
-        job.locked_at = None
-        job.locked_by = None
-        db.commit()
-        assert worker.run_once() is True
-        db.refresh(job)
-        assert job.state == IngestionJobState.resolving_document
-        assert job.paperless_document_id is None
-    finally:
-        db.close()
-
-
-def test_resolving_mismatched_substring_title_does_not_bind(
-    client: TestClient, paperless_transport: FakePaperlessTransport
-) -> None:
-    paperless_transport.omit_related_document_on_success = True
-    _connect(client)
-    job_id = _enqueue(client)
-    correlation = correlation_key_for(job_id)
-    db = get_session_factory()()
-    try:
-        worker = _worker(db, paperless_transport)
-        assert worker.run_once() is True
-        job = db.get(IngestionJob, job_id)
-        assert job is not None
-        upload = paperless_transport.uploaded_files[-1]
-        paperless_transport.documents[upload["document_id"]]["title"] = f"prefix-{correlation}-suffix"
-        job.next_attempt_at = utcnow() - timedelta(seconds=1)
-        job.locked_at = None
-        job.locked_by = None
-        db.commit()
-        assert worker.run_once() is True
-        db.refresh(job)
-        assert job.state == IngestionJobState.resolving_document
-        assert job.paperless_document_id is None
     finally:
         db.close()
 
@@ -592,7 +586,6 @@ def test_complete_with_document_unavailable_stays_retryable(
 ) -> None:
     _connect(client)
     job_id = _enqueue(client)
-    correlation = correlation_key_for(job_id)
     db = get_session_factory()()
     try:
         paperless_transport.omit_related_document_on_success = True
@@ -604,7 +597,8 @@ def test_complete_with_document_unavailable_stays_retryable(
 
         upload = paperless_transport.uploaded_files[-1]
         doc_id = upload["document_id"]
-        paperless_transport.documents[doc_id]["title"] = correlation
+        paperless_transport.tasks[job.paperless_task_id]["related_document_ids"] = [doc_id]
+        paperless_transport.tasks[job.paperless_task_id]["result_data"] = {"document_id": doc_id}
         paperless_transport.server_error.add(doc_id)
         job.next_attempt_at = utcnow() - timedelta(seconds=1)
         job.locked_at = None

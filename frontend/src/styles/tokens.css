@@ -257,6 +257,40 @@ textarea {
   gap: var(--space-2);
 }
 
+.doc-detail-layout {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(0, 1.4fr) minmax(16rem, 1fr);
+  align-items: start;
+}
+
+.doc-preview-pane {
+  min-width: 0;
+}
+
+.doc-preview-frame {
+  display: block;
+  width: 100%;
+  min-height: min(70vh, 42rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-elevated, #fff);
+}
+
+.doc-context-pane h2 {
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .doc-detail-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .doc-preview-frame {
+    min-height: 50vh;
+  }
+}
+
 .tech-details {
   border-top: 1px solid var(--border);
   padding-top: var(--space-2);
