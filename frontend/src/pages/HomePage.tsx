@@ -8,6 +8,7 @@ import {
   type HomeSummary,
   type SessionInfo,
 } from "../api/client";
+import { PageLayout } from "../components/PageLayout";
 import markUrl from "../assets/atlas-docs-mark.svg";
 import { PRODUCT_SLOGAN } from "../brand";
 
@@ -55,6 +56,7 @@ export function HomePage({ session: _session }: Props) {
   }
 
   return (
+    <PageLayout width="standard">
     <section className="home-page" aria-labelledby="home-title">
       <div className="home-brand">
         <img src={markUrl} alt="" width={64} height={64} />
@@ -194,5 +196,6 @@ export function HomePage({ session: _session }: Props) {
         </>
       ) : null}
     </section>
+    </PageLayout>
   );
 }

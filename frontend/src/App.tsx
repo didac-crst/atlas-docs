@@ -88,45 +88,53 @@ export function App() {
           <img src={markUrl} alt="" width={40} height={40} />
           <strong>AtlasDocs</strong>
         </Link>
-        <nav className="site-nav" aria-label="Primary">
+        <div className="site-header-end">
+          <nav className="site-nav" aria-label="Primary">
+            {authenticated ? (
+              <>
+                <Link to="/" aria-current={path === "/" ? "page" : undefined}>
+                  Home
+                </Link>
+                <Link
+                  to="/explore"
+                  aria-current={
+                    path.startsWith("/explore") || path.startsWith("/entities/")
+                      ? "page"
+                      : undefined
+                  }
+                >
+                  Explore
+                </Link>
+                <Link
+                  to="/classify"
+                  aria-current={
+                    path.startsWith("/classify") || path.startsWith("/documents")
+                      ? "page"
+                      : undefined
+                  }
+                >
+                  Classify
+                </Link>
+                <Link
+                  to="/ingest"
+                  aria-current={path.startsWith("/ingest") ? "page" : undefined}
+                >
+                  Ingest
+                </Link>
+              </>
+            ) : (
+              <Link to="/connect" aria-current={path.startsWith("/connect") ? "page" : undefined}>
+                Sign in
+              </Link>
+            )}
+          </nav>
           {authenticated ? (
-            <>
-              <Link to="/" aria-current={path === "/" ? "page" : undefined}>
-                Home
-              </Link>
-              <Link
-                to="/explore"
-                aria-current={
-                  path.startsWith("/explore") || path.startsWith("/entities/")
-                    ? "page"
-                    : undefined
-                }
-              >
-                Explore
-              </Link>
-              <Link
-                to="/classify"
-                aria-current={path.startsWith("/classify") || path.startsWith("/documents") ? "page" : undefined}
-              >
-                Classify
-              </Link>
-              <Link
-                to="/ingest"
-                aria-current={path.startsWith("/ingest") ? "page" : undefined}
-              >
-                Ingest
-              </Link>
-              <AccountMenu
-                usernameLabel={session?.username_label}
-                onDisconnect={onDisconnect}
-              />
-            </>
-          ) : (
-            <Link to="/connect" aria-current={path.startsWith("/connect") ? "page" : undefined}>
-              Sign in
-            </Link>
-          )}
-        </nav>
+            <AccountMenu
+              usernameLabel={session?.username_label}
+              onDisconnect={onDisconnect}
+            />
+          ) : null}
+        </div>
       </header>
       <main id="main-content" className="main" tabIndex={-1}>
         {bootError && session ? (

@@ -30,6 +30,7 @@ const baseDoc = {
   correspondent: "Acme Payroll",
   document_type: "Payslip",
   open_url: null as string | null,
+  lifecycle_category: "evidence" as const,
   relationships: [] as {
     id: string;
     type: string;
@@ -92,7 +93,8 @@ describe("SemanticDocumentDetail document actions", () => {
     vi.clearAllMocks();
   });
 
-  it("renders inline preview, download, and advanced Paperless actions", () => {
+  it("renders workbench preview and primary actions without Paperless ids", async () => {
+    const user = userEvent.setup();
     render(
       <MemoryRouter>
         <SemanticDocumentDetail
@@ -106,34 +108,31 @@ describe("SemanticDocumentDetail document actions", () => {
     const frame = document.querySelector("iframe.doc-preview-frame");
     expect(frame).not.toBeNull();
     expect(frame).toHaveAttribute("src", "/ui/api/documents/184/preview");
-    expect(frame).toHaveAttribute("title", "Preview of Payslip Germany");
     expect(frame).not.toHaveAttribute("sandbox");
-    expect(frame?.getAttribute("src")).not.toMatch(/paperless/i);
 
-    const openTab = screen.getByRole("link", { name: /Open preview in new tab/i });
-    expect(openTab).toHaveAttribute("href", "/ui/api/documents/184/preview");
-    expect(openTab).toHaveAttribute("target", "_blank");
-
-    const download = screen.getByRole("link", {
-      name: (_content, element) => element?.textContent?.replace(/\s+/g, " ").trim() === "Download",
-    });
-    expect(download).toHaveAttribute("href", "/ui/api/documents/184/download");
-    expect(screen.getByRole("link", { name: /Download original/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /^Download$/i })).toHaveAttribute(
       "href",
-      "/ui/api/documents/184/download?original=true",
+      "/ui/api/documents/184/download",
     );
-
-    const paperless = screen.getByRole("link", { name: /Open original in Paperless/i });
-    expect(paperless).toHaveAttribute("href", "https://docs.example.test/documents/184/");
-    expect(paperless).toHaveClass("btn-ghost");
-    expect(screen.getByText("Payslip · Acme Payroll · 2024")).toBeInTheDocument();
-    expect(screen.getByText(/Technical details/i)).toBeInTheDocument();
-    expect(screen.queryByText(/^Document 184$/)).toBeNull();
-    expect(screen.getByRole("button", { name: /^Replace document$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Move to trash$/i })).toBeInTheDocument();
+    expect(screen.getByText("Payslip · Acme Payroll · 2024")).toBeInTheDocument();
+    expect(screen.queryByText(/^Document 184$/)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /More actions/i }));
+    expect(screen.getByRole("menuitem", { name: /Open preview in new tab/i })).toHaveAttribute(
+      "href",
+      "/ui/api/documents/184/preview",
+    );
+    expect(screen.getByRole("menuitem", { name: /Download original/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Open in Paperless/i })).toHaveAttribute(
+      "href",
+      "https://docs.example.test/documents/184/",
+    );
+    expect(screen.getByRole("menuitem", { name: /Replace document/i })).toBeInTheDocument();
   });
 
-  it("disables Paperless action when open_url is missing", () => {
+  it("disables Paperless action when open_url is missing", async () => {
+    const user = userEvent.setup();
     render(
       <MemoryRouter>
         <SemanticDocumentDetail
@@ -144,11 +143,9 @@ describe("SemanticDocumentDetail document actions", () => {
         />
       </MemoryRouter>,
     );
-    const button = screen.getByRole("button", { name: /Open original in Paperless/i });
-    expect(button).toBeDisabled();
-    expect(screen.queryByRole("link", { name: /Open original in Paperless/i })).toBeNull();
-    expect(screen.getByRole("link", { name: /Open preview in new tab/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /^Download$/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /More actions/i }));
+    expect(screen.getByRole("menuitem", { name: /Open in Paperless/i })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: /Open preview in new tab/i })).toBeInTheDocument();
   });
 
   it("keeps Paperless id in collapsed technical details only", () => {
@@ -167,7 +164,7 @@ describe("SemanticDocumentDetail document actions", () => {
     expect(screen.getByText("entity-1")).toBeInTheDocument();
   });
 
-  it("requires confirmation before moving a document to trash", async () => {
+  it("requires confirmation dialog before moving a document to trash", async () => {
     const user = userEvent.setup();
     const onDocumentDeleted = vi.fn(async () => undefined);
     vi.mocked(deleteDocument).mockResolvedValue(undefined as never);
@@ -175,7 +172,7 @@ describe("SemanticDocumentDetail document actions", () => {
     render(
       <MemoryRouter>
         <SemanticDocumentDetail
-          document={{ ...baseDoc, open_url: null, lifecycle_category: "evidence" }}
+          document={{ ...baseDoc, open_url: null }}
           csrfToken="csrf"
           onRemoved={vi.fn()}
           onDocumentDeleted={onDocumentDeleted}
@@ -186,9 +183,8 @@ describe("SemanticDocumentDetail document actions", () => {
 
     await user.click(screen.getByRole("button", { name: /^Move to trash$/i }));
     expect(deleteDocument).not.toHaveBeenCalled();
-    expect(
-      screen.getByText(/Move this document to Paperless trash/i),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.getByText(/Move this document to trash/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^Confirm move to trash$/i }));
     expect(deleteDocument).toHaveBeenCalledWith(184, "csrf", {
       confirm: true,

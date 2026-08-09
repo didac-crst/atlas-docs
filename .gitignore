@@ -24,3 +24,4 @@ src/atlasdocs/ui/spa/
 playwright-report/
 test-results/
 blob-report/
+tmp-ux-shots

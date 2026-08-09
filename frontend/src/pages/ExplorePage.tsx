@@ -15,6 +15,8 @@ import {
   type SortOrder,
 } from "../api/client";
 import { ExploreResultCard } from "../components/ExploreResultCard";
+import { DocumentViewerModal } from "../components/DocumentViewerModal";
+import { PageLayout } from "../components/PageLayout";
 
 type Props = {
   session: SessionInfo;
@@ -98,6 +100,22 @@ export function ExplorePage({ session: _session }: Props) {
   const navigate = useNavigate();
   const page = Number(searchParams.get("page") || "1") || 1;
   const mode = parseMode(searchParams.get("mode"));
+  const previewId = Number(searchParams.get("preview") || "") || null;
+  const previewTitle = searchParams.get("preview_title") || "Document preview";
+
+  function openPreview(paperlessDocumentId: number, title: string) {
+    const next = new URLSearchParams(searchParams);
+    next.set("preview", String(paperlessDocumentId));
+    next.set("preview_title", title);
+    setSearchParams(next);
+  }
+
+  function closePreview() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("preview");
+    next.delete("preview_title");
+    setSearchParams(next);
+  }
   const view = parseView(searchParams.get("view"));
 
   const filters: ExploreFilters = useMemo(
@@ -271,7 +289,8 @@ export function ExplorePage({ session: _session }: Props) {
   };
 
   return (
-    <section className="explore-page" aria-labelledby="explore-title">
+    <PageLayout width="wide">
+      <section className="explore-page" aria-labelledby="explore-title">
       <header className="explore-header">
         <div>
           <h1 id="explore-title">Explore</h1>
@@ -478,6 +497,7 @@ export function ExplorePage({ session: _session }: Props) {
                 key={`${item.entity_type}-${item.id ?? item.paperless_document_id ?? index}`}
                 item={item}
                 view={view}
+                onPreview={openPreview}
               />
             ))}
           </div>
@@ -507,6 +527,14 @@ export function ExplorePage({ session: _session }: Props) {
           </nav>
         </>
       ) : null}
-    </section>
+      {previewId ? (
+        <DocumentViewerModal
+          paperlessDocumentId={previewId}
+          title={previewTitle}
+          onClose={closePreview}
+        />
+      ) : null}
+      </section>
+    </PageLayout>
   );
 }

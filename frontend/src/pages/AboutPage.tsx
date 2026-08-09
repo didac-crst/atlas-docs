@@ -1,9 +1,11 @@
 import { Link } from "react-router-dom";
 import { PRODUCT_NAME, PRODUCT_SLOGAN } from "../brand";
+import { PageLayout } from "../components/PageLayout";
 import { ProductIdentity } from "../components/ProductIdentity";
 
 export function AboutPage() {
   return (
+    <PageLayout width="narrow">
     <section className="about-page" aria-labelledby="about-title">
       <ProductIdentity titleId="about-title" size="lg" />
 
@@ -46,5 +48,6 @@ ${PRODUCT_SLOGAN}`}</pre>
         </p>
       </div>
     </section>
+    </PageLayout>
   );
 }

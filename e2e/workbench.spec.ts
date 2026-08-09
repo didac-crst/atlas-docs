@@ -127,24 +127,26 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   const detail = page.locator(".detail-panel");
   await expect(detail.getByRole("heading", { name: /Payslip Germany/i })).toBeVisible();
   await expect(detail.getByRole("button", { name: /^Move to trash$/i })).toBeVisible();
-  await expect(detail.getByRole("link", { name: /Download original/i })).toBeVisible();
 
   const previewFrame = detail.locator("iframe.doc-preview-frame");
   await expect(previewFrame).toHaveAttribute("src", /\/ui\/api\/documents\/184\/preview$/);
-  const openPreview = detail.getByRole("link", { name: /Open preview in new tab/i });
-  await expect(openPreview).toHaveAttribute("href", /\/ui\/api\/documents\/184\/preview$/);
   const download = detail.getByRole("link", { name: /^Download$/i });
   await expect(download).toHaveAttribute("href", /\/ui\/api\/documents\/184\/download$/);
-  const paperless = detail.getByRole("link", { name: /Open original in Paperless/i });
+  await detail.getByRole("button", { name: /More actions/i }).click();
+  const openPreview = detail.getByRole("menuitem", { name: /Open preview in new tab/i });
+  await expect(openPreview).toHaveAttribute("href", /\/ui\/api\/documents\/184\/preview$/);
+  await expect(detail.getByRole("menuitem", { name: /Download original/i })).toBeVisible();
+  const paperless = detail.getByRole("menuitem", { name: /Open in Paperless/i });
   await expect(paperless).toHaveAttribute(
     "href",
     "http://paperless.example.test/documents/184/",
   );
   await expect(paperless).toHaveAttribute("target", "_blank");
+  await page.keyboard.press("Escape");
 
   await detail.getByRole("button", { name: /^Move to trash$/i }).click();
   await expect(detail.getByRole("alertdialog")).toBeVisible();
-  await expect(detail.getByText(/Move this document to Paperless trash/i)).toBeVisible();
+  await expect(detail.getByText(/Move this document to trash/i)).toBeVisible();
   await detail.getByRole("button", { name: /^Cancel$/i }).click();
   await expect(detail.getByRole("alertdialog")).toHaveCount(0);
   await expect(detail.getByRole("button", { name: /^Move to trash$/i })).toBeVisible();

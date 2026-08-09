@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { FilePlus2 } from "lucide-react";
 import {
   ApiError,
@@ -11,6 +11,7 @@ import {
   type IngestJob,
   type SessionInfo,
 } from "../api/client";
+import { PageLayout } from "../components/PageLayout";
 
 type Props = {
   session: SessionInfo;
@@ -138,6 +139,7 @@ export function IngestPage({ session, onSession }: Props) {
   }
 
   return (
+    <PageLayout width="standard">
     <div className="ingest-layout">
       <section className="panel" aria-labelledby="ingest-title">
         <h1 id="ingest-title">
@@ -196,7 +198,7 @@ export function IngestPage({ session, onSession }: Props) {
                   <th scope="col">File</th>
                   <th scope="col">State</th>
                   <th scope="col">Updated</th>
-                  <th scope="col">Paperless</th>
+                  <th scope="col">Document</th>
                   <th scope="col">Error</th>
                   <th scope="col">Actions</th>
                 </tr>
@@ -213,8 +215,12 @@ export function IngestPage({ session, onSession }: Props) {
                     <td className="muted" style={{ fontVariantNumeric: "tabular-nums" }}>
                       {formatTimestamp(job.updated_at)}
                     </td>
-                    <td style={{ fontVariantNumeric: "tabular-nums" }}>
-                      {job.paperless_document_id ?? "—"}
+                    <td>
+                      {job.paperless_document_id != null ? (
+                        <Link to={`/documents/${job.paperless_document_id}`}>Open</Link>
+                      ) : (
+                        <span className="muted">Pending</span>
+                      )}
                     </td>
                     <td className="muted">
                       {job.error_message || job.error_code || "—"}
@@ -246,6 +252,7 @@ export function IngestPage({ session, onSession }: Props) {
         )}
       </section>
     </div>
+    </PageLayout>
   );
 }
 

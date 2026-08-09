@@ -35,9 +35,11 @@ test("embedded preview uses same-origin BFF PDF without leaking tokens", async (
     "href",
     /\/ui\/api\/documents\/184\/download$/,
   );
+  await detail.getByRole("button", { name: /More actions/i }).click();
   await expect(
-    detail.getByRole("link", { name: /Open original in Paperless/i }),
+    detail.getByRole("menuitem", { name: /Open in Paperless/i }),
   ).toHaveAttribute("href", /\/documents\/184\/$/);
+  await page.keyboard.press("Escape");
 
   const previewResponse = await page.request.get("/ui/api/documents/184/preview");
   expect(previewResponse.status()).toBe(200);

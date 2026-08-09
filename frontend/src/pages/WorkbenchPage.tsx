@@ -192,7 +192,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
         : "Needs classification";
 
   return (
-    <div className={`workbench${selectedId ? " detail-open" : ""}`}>
+    <div className={`workbench workbench-classify${selectedId ? " detail-open" : ""}`}>
       {error ? (
         <div className="banner banner-error" role="alert" style={{ gridColumn: "1 / -1" }}>
           {error}
@@ -238,6 +238,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
               </Link>
             </div>
             <SemanticDocumentDetail
+              layout="workbench"
               document={document}
               csrfToken={session.csrf_token}
               onAddRelationship={() => {
@@ -286,7 +287,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
           <>
             <h1 id="detail-title">Select a document</h1>
             <p className="empty">
-              Choose a document from the queue to assign typed relationships.
+              Choose a document from the queue to classify with an embedded preview and relationships.
             </p>
           </>
         )}
