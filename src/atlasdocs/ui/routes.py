@@ -739,6 +739,15 @@ def _safe_download_filename(name: str | None, fallback: str) -> str:
     return base[:180]
 
 
+def _preview_media_allowed(media: str) -> bool:
+    """PDF and raster images only — never SVG (XSS if rendered inline)."""
+    if media == "application/pdf":
+        return True
+    if media.startswith("image/") and "svg" not in media:
+        return True
+    return False
+
+
 def _stream_paperless_document(
     *,
     auth: str,
@@ -765,13 +774,16 @@ def _stream_paperless_document(
         ) from None
 
     media = (content_type or "application/octet-stream").split(";")[0].strip().lower()
-    if kind == "preview" and media not in {"application/pdf"} and not media.startswith("image/"):
-        # Drain/close the upstream stream without exposing bytes to the client.
-        for _ in chunks:
-            break
+    if kind == "preview" and not _preview_media_allowed(media):
+        close = getattr(chunks, "close", None)
+        if callable(close):
+            close()
+        else:
+            for _ in chunks:
+                break
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Preview is only available for PDF and images",
+            detail="Preview is only available for PDF and raster images",
         )
 
     safe_name = _safe_download_filename(filename, f"document-{paperless_document_id}")

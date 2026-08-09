@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 
+# Capture the full credential after Authorization= / Token / Bearer so the secret
+# itself is replaced, not only the scheme word.
 _TOKEN_PATTERNS = (
-    re.compile(r"(?i)(authorization\s*[:=]\s*)(\S+)"),
+    re.compile(r"(?i)(authorization\s*[:=]\s*)((?:token\s+|bearer\s+)?\S+)"),
     re.compile(r"(?i)(token\s+)([A-Za-z0-9._\-]{8,})"),
     re.compile(r"(?i)(bearer\s+)([A-Za-z0-9._\-]{8,})"),
     re.compile(r"(?i)((?:paperless[_-]?token|api[_-]?token|access[_-]?token)\s*[:=]\s*)(\S+)"),

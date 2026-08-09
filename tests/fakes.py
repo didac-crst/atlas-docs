@@ -67,6 +67,12 @@ class FakePaperlessTransport(httpx.BaseTransport):
         self.omit_related_document_on_success = False
         # When True, SUCCESS tasks expose document_id only via result_data.
         self.success_document_id_in_result_data = False
+        # When True, SUCCESS tasks use related_document_ids only.
+        self.success_via_related_document_ids = False
+        # When True, SUCCESS tasks use a JSON string in result.
+        self.success_via_json_result = False
+        # Override Content-Type for preview/download responses (415 tests).
+        self.preview_content_type: str | None = None
         self.content_hashes: dict[str, int] = {}  # sha256 hex -> paperless id
 
     def _authorized(self, request: httpx.Request) -> bool:
@@ -149,6 +155,10 @@ class FakePaperlessTransport(httpx.BaseTransport):
             if self.task_auto_succeed:
                 if self.success_document_id_in_result_data:
                     task_row["result_data"] = {"document_id": doc_id}
+                elif self.success_via_related_document_ids:
+                    task_row["related_document_ids"] = [doc_id]
+                elif self.success_via_json_result:
+                    task_row["result"] = json.dumps({"document_id": doc_id})
                 elif not self.omit_related_document_on_success:
                     task_row["related_document"] = doc_id
                     task_row["result"] = str(doc_id)
@@ -295,8 +305,9 @@ class FakePaperlessTransport(httpx.BaseTransport):
             doc = self.documents[document_id]
             filename = str(doc.get("title") or f"document-{document_id}.pdf")
             content = b"%PDF-fake-" + kind.encode("ascii") + b"-" + str(document_id).encode("ascii")
+            content_type = self.preview_content_type or "application/pdf"
             headers = {
-                "content-type": "application/pdf",
+                "content-type": content_type,
                 "content-disposition": f'attachment; filename="{filename}"',
             }
             return httpx.Response(200, content=content, headers=headers)

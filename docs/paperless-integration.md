@@ -114,8 +114,10 @@ document duplicate authority on consume.
 
 Terminal `FAILED` jobs cannot be retried.
 
-Tune resolution with `INGEST_RESOLUTION_TIMEOUT_SECONDS` and
-`INGEST_RESOLUTION_MAX_ATTEMPTS` (see `.env.example`).
+Tune resolution with `INGEST_RESOLUTION_TIMEOUT_SECONDS`,
+`INGEST_RESOLUTION_MAX_ATTEMPTS`, and `INGEST_RETRYABLE_RETENTION_SECONDS`
+(see `.env.example`). Stale `RETRYABLE_FAILURE` jobs past the retention window
+are reaped to terminal `FAILED` (token and spool wiped).
 
 ## Document content proxy
 
@@ -124,7 +126,7 @@ Paperless token:
 
 | Route | Behavior |
 | --- | --- |
-| `GET /ui/api/documents/{id}/preview` | Stream PDF/image inline (`Cache-Control: no-store`) |
+| `GET /ui/api/documents/{id}/preview` | Stream PDF/raster image inline (`Cache-Control: no-store`; SVG rejected) |
 | `GET /ui/api/documents/{id}/download` | Stream bytes as attachment |
 
 Both require an authenticated UI session. AtlasDocs checks Paperless access

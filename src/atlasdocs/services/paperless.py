@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 from typing import BinaryIO, Iterator, Literal
+from urllib.parse import unquote, urlencode
 
 import httpx
 
@@ -154,10 +155,36 @@ def _filename_from_content_disposition(header: str | None) -> str | None:
     match = _CONTENT_DISPOSITION_FILENAME.search(header)
     if not match:
         return None
-    for group in match.groups():
-        if group:
-            return group.strip()
+    star, quoted, plain = match.groups()
+    if star:
+        return unquote(star.strip())
+    if quoted:
+        return quoted.strip()
+    if plain:
+        return plain.strip()
     return None
+
+
+class _StreamingBytes:
+    """Iterator that always closes the upstream httpx response/client."""
+
+    def __init__(self, response: httpx.Response, client: httpx.Client) -> None:
+        self._response = response
+        self._client = client
+        self._closed = False
+
+    def __iter__(self) -> Iterator[bytes]:
+        try:
+            yield from self._response.iter_bytes()
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._response.close()
+        self._client.close()
 
 
 class PaperlessClient:
@@ -337,8 +364,6 @@ class PaperlessClient:
         document_type: str | None = None,
         tag: str | None = None,
     ) -> PaperlessDocumentPage:
-        from urllib.parse import urlencode
-
         params: dict[str, str | int] = {"page": page, "page_size": page_size}
         if query:
             params["query"] = query
@@ -383,8 +408,6 @@ class PaperlessClient:
 
     def find_document_id_by_title(self, token: str, title: str) -> int | None:
         """Return a document id only when title matches exactly one Paperless document."""
-        from urllib.parse import urlencode
-
         params = {"title__iexact": title, "page_size": 2}
         url = f"{self._base_url}/api/documents/?{urlencode(params)}"
         response = self._request("GET", url, token)
@@ -442,8 +465,6 @@ class PaperlessClient:
         raise PaperlessUnavailableError("Paperless post_document response missing task id")
 
     def get_task(self, task_id: str, token: str) -> PaperlessTaskStatus:
-        from urllib.parse import urlencode
-
         url = f"{self._base_url}/api/tasks/?{urlencode({'task_id': task_id})}"
         response = self._request("GET", url, token)
         self._raise_for_status(response)
@@ -514,16 +535,7 @@ class PaperlessClient:
 
         content_type = response.headers.get("content-type") or "application/octet-stream"
         filename = _filename_from_content_disposition(response.headers.get("content-disposition"))
-
-        def iter_bytes() -> Iterator[bytes]:
-            try:
-                for chunk in response.iter_bytes():
-                    yield chunk
-            finally:
-                response.close()
-                client.close()
-
-        return iter_bytes(), content_type, filename
+        return _StreamingBytes(response, client), content_type, filename
 
     def document_exists(self, document_id: int, token: str) -> bool:
         self.get_document(document_id, token=token)

@@ -412,6 +412,128 @@ def test_retry_job_without_task_id_returns_uploading(
         db.close()
 
 
+def test_retry_job_missing_spool_does_not_mutate(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    from atlasdocs.services.documents import ValidationError
+
+    _connect(client)
+    job_id = _enqueue(client)
+    db = get_session_factory()()
+    try:
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        job.state = IngestionJobState.retryable_failure
+        job.paperless_task_id = None
+        job.error_code = "worker_error"
+        db.commit()
+        spool_path_for(job_id).unlink(missing_ok=True)
+        old_cipher = job.token_ciphertext
+
+        service = IngestionService(
+            db,
+            PaperlessClient(base_url="http://paperless.test", transport=paperless_transport),
+        )
+        with pytest.raises(ValidationError, match="spool"):
+            service.retry_job(str(job_id), "Token test-token")
+        db.refresh(job)
+        assert job.state == IngestionJobState.retryable_failure
+        assert job.token_ciphertext == old_cipher
+        assert job.error_code == "worker_error"
+    finally:
+        db.close()
+
+
+def test_retryable_failure_expires_to_terminal(
+    client: TestClient, paperless_transport: FakePaperlessTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("INGEST_RETRYABLE_RETENTION_SECONDS", "1")
+    get_settings.cache_clear()
+    _connect(client)
+    job_id = _enqueue(client)
+    db = get_session_factory()()
+    try:
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        job.state = IngestionJobState.retryable_failure
+        job.error_code = "missing_document"
+        job.updated_at = utcnow() - timedelta(seconds=30)
+        db.commit()
+        assert spool_path_for(job_id).exists()
+
+        worker = _worker(db, paperless_transport)
+        assert worker.run_once() is True
+        db.refresh(job)
+        assert job.state == IngestionJobState.failed
+        assert job.error_code == "retryable_expired"
+        assert job.token_ciphertext is None
+        assert not spool_path_for(job_id).exists()
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
+def test_complete_with_document_unavailable_stays_retryable(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    _connect(client)
+    job_id = _enqueue(client)
+    correlation = correlation_key_for(job_id)
+    db = get_session_factory()()
+    try:
+        paperless_transport.omit_related_document_on_success = True
+        worker = _worker(db, paperless_transport)
+        assert worker.run_once() is True
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        assert job.state == IngestionJobState.resolving_document
+
+        upload = paperless_transport.uploaded_files[-1]
+        doc_id = upload["document_id"]
+        paperless_transport.documents[doc_id]["title"] = correlation
+        paperless_transport.server_error.add(doc_id)
+        job.next_attempt_at = utcnow() - timedelta(seconds=1)
+        job.locked_at = None
+        job.locked_by = None
+        db.commit()
+
+        assert worker.run_once() is True
+        db.refresh(job)
+        assert job.state == IngestionJobState.resolving_document
+        assert job.token_ciphertext is not None
+        assert spool_path_for(job_id).exists()
+    finally:
+        db.close()
+
+
+def test_resolution_unavailable_does_not_increment_attempt_count(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    _connect(client)
+    job_id = _enqueue(client)
+    db = get_session_factory()()
+    try:
+        paperless_transport.omit_related_document_on_success = True
+        worker = _worker(db, paperless_transport)
+        assert worker.run_once() is True
+        job = db.get(IngestionJob, job_id)
+        assert job is not None
+        assert job.state == IngestionJobState.resolving_document
+        before = job.resolution_attempt_count
+
+        job.next_attempt_at = utcnow() - timedelta(seconds=1)
+        job.locked_at = None
+        job.locked_by = None
+        db.commit()
+        with patch.object(worker._paperless, "get_task", side_effect=PaperlessUnavailableError("down")):
+            assert worker.run_once() is True
+        db.refresh(job)
+        assert job.resolution_attempt_count == before
+        assert job.state == IngestionJobState.resolving_document
+    finally:
+        db.close()
+
+
 def test_token_redaction_on_exception_path(
     client: TestClient, paperless_transport: FakePaperlessTransport, caplog: pytest.LogCaptureFixture
 ) -> None:

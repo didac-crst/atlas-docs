@@ -12,6 +12,19 @@ def test_redact_secrets_token_prefix() -> None:
     assert "Token [REDACTED]" in redacted
 
 
+def test_redact_secrets_authorization_header_forms() -> None:
+    cases = (
+        "Authorization: Token secret-abc",
+        "Authorization: Bearer secret-abc",
+        "authorization=Token secret-abc",
+        "Authorization=Bearer secret-abc",
+    )
+    for raw in cases:
+        redacted = redact_secrets(raw)
+        assert "secret-abc" not in redacted, raw
+        assert "[REDACTED]" in redacted, raw
+
+
 def test_redact_secrets_bearer_and_named_tokens() -> None:
     raw = "Bearer abcdefghij and paperless_token=super-secret-value"
     redacted = redact_secrets(raw)

@@ -110,6 +110,27 @@ def test_response_never_contains_token_values(
             assert "Token " not in value
 
 
+def test_preview_rejects_svg_content_type(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    paperless_transport.preview_content_type = "image/svg+xml"
+    _connect(client)
+    response = client.get("/ui/api/documents/184/preview")
+    assert response.status_code == 415
+    assert response.json()["detail"] == "Preview is only available for PDF and raster images"
+    assert "bff-content-token" not in response.text
+
+
+def test_preview_rejects_non_image_non_pdf(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    paperless_transport.preview_content_type = "application/octet-stream"
+    _connect(client)
+    response = client.get("/ui/api/documents/184/preview")
+    assert response.status_code == 415
+    assert response.json()["detail"] == "Preview is only available for PDF and raster images"
+
+
 def test_no_atlasdocs_disk_write_of_document_bytes(
     client: TestClient, paperless_transport: FakePaperlessTransport, tmp_path: Path, monkeypatch
 ) -> None:

@@ -23,6 +23,7 @@ DEFAULT_LOGIN_RATE_LIMIT_WINDOW_SECONDS = 600
 DEFAULT_INGEST_LEASE_SECONDS = 120
 DEFAULT_INGEST_RESOLUTION_TIMEOUT_SECONDS = 900
 DEFAULT_INGEST_RESOLUTION_MAX_ATTEMPTS = 30
+DEFAULT_INGEST_RETRYABLE_RETENTION_SECONDS = 7 * 24 * 60 * 60
 
 
 class Settings(BaseSettings):
@@ -57,6 +58,7 @@ class Settings(BaseSettings):
     ingest_lease_seconds: int = DEFAULT_INGEST_LEASE_SECONDS
     ingest_resolution_timeout_seconds: int = DEFAULT_INGEST_RESOLUTION_TIMEOUT_SECONDS
     ingest_resolution_max_attempts: int = DEFAULT_INGEST_RESOLUTION_MAX_ATTEMPTS
+    ingest_retryable_retention_seconds: int = DEFAULT_INGEST_RETRYABLE_RETENTION_SECONDS
     login_rate_limit_attempts: int = DEFAULT_LOGIN_RATE_LIMIT_ATTEMPTS
     login_rate_limit_window_seconds: int = DEFAULT_LOGIN_RATE_LIMIT_WINDOW_SECONDS
 
