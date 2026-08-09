@@ -71,8 +71,8 @@ describe("SemanticDocumentDetail helpers", () => {
   });
 });
 
-describe("SemanticDocumentDetail Open original in Paperless", () => {
-  it("renders an external action when open_url is present", () => {
+describe("SemanticDocumentDetail document actions", () => {
+  it("renders preview, download, and advanced Paperless actions", () => {
     render(
       <SemanticDocumentDetail
         document={{ ...baseDoc, open_url: "https://docs.example.test/documents/184/" }}
@@ -81,16 +81,23 @@ describe("SemanticDocumentDetail Open original in Paperless", () => {
         onError={vi.fn()}
       />,
     );
-    const link = screen.getByRole("link", { name: /Open original in Paperless/i });
-    expect(link).toHaveAttribute("href", "https://docs.example.test/documents/184/");
-    expect(link).toHaveAttribute("target", "_blank");
-    expect(link).toHaveClass("btn", "btn-primary");
+    const preview = screen.getByRole("link", { name: /^Preview$/i });
+    expect(preview).toHaveAttribute("href", "/ui/api/documents/184/preview");
+    expect(preview).toHaveAttribute("target", "_blank");
+    expect(preview).toHaveAttribute("rel", expect.stringContaining("noopener"));
+
+    const download = screen.getByRole("link", { name: /^Download$/i });
+    expect(download).toHaveAttribute("href", "/ui/api/documents/184/download");
+
+    const paperless = screen.getByRole("link", { name: /Open original in Paperless/i });
+    expect(paperless).toHaveAttribute("href", "https://docs.example.test/documents/184/");
+    expect(paperless).toHaveClass("btn-ghost");
     expect(screen.getByText("Payslip · Acme Payroll · 2024")).toBeInTheDocument();
     expect(screen.getByText(/Technical details/i)).toBeInTheDocument();
     expect(screen.queryByText(/^Document 184$/)).toBeNull();
   });
 
-  it("disables the action when open_url is missing", () => {
+  it("disables Paperless action when open_url is missing", () => {
     render(
       <SemanticDocumentDetail
         document={{ ...baseDoc, open_url: null }}
@@ -102,6 +109,8 @@ describe("SemanticDocumentDetail Open original in Paperless", () => {
     const button = screen.getByRole("button", { name: /Open original in Paperless/i });
     expect(button).toBeDisabled();
     expect(screen.queryByRole("link", { name: /Open original in Paperless/i })).toBeNull();
+    expect(screen.getByRole("link", { name: /^Preview$/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Download$/i })).toBeInTheDocument();
   });
 
   it("keeps Paperless id in collapsed technical details only", () => {

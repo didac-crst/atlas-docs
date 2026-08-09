@@ -81,11 +81,13 @@ describe("summarizeBulkResults", () => {
 });
 
 describe("jobNeedsPolling", () => {
-  it("polls uploading and processing only", () => {
+  it("polls uploading, processing, and resolving", () => {
     expect(jobNeedsPolling({ state: "UPLOADING" })).toBe(true);
     expect(jobNeedsPolling({ state: "PROCESSING" })).toBe(true);
+    expect(jobNeedsPolling({ state: "RESOLVING_DOCUMENT" })).toBe(true);
     expect(jobNeedsPolling({ state: "READY" })).toBe(false);
     expect(jobNeedsPolling({ state: "FAILED" })).toBe(false);
+    expect(jobNeedsPolling({ state: "RETRYABLE_FAILURE" })).toBe(false);
   });
 });
 

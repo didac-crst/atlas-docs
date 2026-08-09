@@ -70,6 +70,12 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   const detail = page.locator(".detail-panel");
   await expect(detail.getByRole("heading", { name: /Payslip Germany/i })).toBeVisible();
 
+  const preview = detail.getByRole("link", { name: /^Preview$/i });
+  await expect(preview).toHaveAttribute("href", /\/ui\/api\/documents\/184\/preview$/);
+  const download = detail.getByRole("link", { name: /^Download$/i });
+  await expect(download).toHaveAttribute("href", /\/ui\/api\/documents\/184\/download$/);
+  await expect(detail.getByRole("link", { name: /Open original in Paperless/i })).toBeVisible();
+
   await page.getByRole("link", { name: /Reconcile/i }).first().click();
   await expect(page.getByRole("heading", { name: /reconciliation/i })).toBeVisible();
   await page.getByRole("button", { name: /Run reconciliation/i }).click();

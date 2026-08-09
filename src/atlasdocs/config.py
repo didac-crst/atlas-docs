@@ -21,6 +21,8 @@ DEFAULT_INGEST_BULK_MAX_DOCUMENTS = 50
 DEFAULT_LOGIN_RATE_LIMIT_ATTEMPTS = 10
 DEFAULT_LOGIN_RATE_LIMIT_WINDOW_SECONDS = 600
 DEFAULT_INGEST_LEASE_SECONDS = 120
+DEFAULT_INGEST_RESOLUTION_TIMEOUT_SECONDS = 900
+DEFAULT_INGEST_RESOLUTION_MAX_ATTEMPTS = 30
 
 
 class Settings(BaseSettings):
@@ -53,6 +55,8 @@ class Settings(BaseSettings):
     ingest_processing_timeout_seconds: int = DEFAULT_INGEST_PROCESSING_TIMEOUT_SECONDS
     ingest_bulk_max_documents: int = DEFAULT_INGEST_BULK_MAX_DOCUMENTS
     ingest_lease_seconds: int = DEFAULT_INGEST_LEASE_SECONDS
+    ingest_resolution_timeout_seconds: int = DEFAULT_INGEST_RESOLUTION_TIMEOUT_SECONDS
+    ingest_resolution_max_attempts: int = DEFAULT_INGEST_RESOLUTION_MAX_ATTEMPTS
     login_rate_limit_attempts: int = DEFAULT_LOGIN_RATE_LIMIT_ATTEMPTS
     login_rate_limit_window_seconds: int = DEFAULT_LOGIN_RATE_LIMIT_WINDOW_SECONDS
 
@@ -108,7 +112,13 @@ class Settings(BaseSettings):
             raise ValueError("UNCLASSIFIED_MAX_UPSTREAM_PAGES must be >= 1")
         return value
 
-    @field_validator("ingest_max_upload_bytes", "ingest_max_attempts", "ingest_bulk_max_documents")
+    @field_validator(
+        "ingest_max_upload_bytes",
+        "ingest_max_attempts",
+        "ingest_bulk_max_documents",
+        "ingest_resolution_timeout_seconds",
+        "ingest_resolution_max_attempts",
+    )
     @classmethod
     def _positive_ingest_ints(cls, value: int) -> int:
         if value < 1:

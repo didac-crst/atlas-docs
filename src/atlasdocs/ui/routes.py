@@ -17,7 +17,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -45,6 +45,7 @@ from atlasdocs.api.schemas import (
 )
 from atlasdocs.config import UNCLASSIFIED_PAGE_SIZE
 from atlasdocs.db.session import get_db
+from atlasdocs.security.redact import redact_secrets
 from atlasdocs.services.documents import (
     ConflictError,
     DocumentService,
@@ -57,7 +58,13 @@ from atlasdocs.services.documents import (
 from atlasdocs.services.home import HomeService
 from atlasdocs.services.ingest import DuplicateIngestError, IngestionService
 from atlasdocs.services.login_rate_limit import login_rate_limiter
-from atlasdocs.services.paperless import PaperlessAuthError, PaperlessClient, PaperlessError
+from atlasdocs.services.paperless import (
+    PaperlessAuthError,
+    PaperlessClient,
+    PaperlessError,
+    PaperlessNotFoundError,
+    PaperlessUnavailableError,
+)
 from atlasdocs.services.reconcile import ReconcileService
 from atlasdocs.ui.sessions import (
     DbSessionStore,
@@ -136,23 +143,24 @@ def _validate_csrf(session_csrf: str, csrf_token: str | None) -> bool:
 
 
 def _to_http_error(exc: Exception) -> HTTPException:
+    detail = redact_secrets(str(exc))
     if isinstance(exc, UnauthorizedError):
-        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
     if isinstance(exc, NotFoundError):
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     if isinstance(exc, ForbiddenDocumentError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     if isinstance(exc, DuplicateIngestError):
-        detail = str(exc)
+        msg = detail
         if exc.paperless_document_id is not None:
-            detail = f"{detail}; paperless_document_id={exc.paperless_document_id}"
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+            msg = f"{msg}; paperless_document_id={exc.paperless_document_id}"
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg)
     if isinstance(exc, ConflictError):
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
     if isinstance(exc, ValidationError):
-        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
     if isinstance(exc, UpstreamError):
-        return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+        return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error")
 
 
@@ -702,6 +710,110 @@ def get_ingest_job(
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
     return _json_with_session(_serialize_job(job), ui_session)
+
+
+@api_router.post("/ingest/jobs/{job_id}/retry", response_model=IngestionJobResponse)
+def retry_ingest_job(
+    request: Request,
+    job_id: str,
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: IngestionService = Depends(get_ui_ingest_service),
+) -> JSONResponse:
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        job = service.retry_job(job_id, auth)
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session(_serialize_job(job), ui_session)
+
+
+def _safe_download_filename(name: str | None, fallback: str) -> str:
+    base = (name or fallback).replace('"', "").replace("\n", " ").replace("\r", " ").strip()
+    base = base.split("/")[-1].split("\\")[-1] or fallback
+    return base[:180]
+
+
+def _stream_paperless_document(
+    *,
+    auth: str,
+    paperless: PaperlessClient,
+    paperless_document_id: int,
+    kind: str,
+    disposition: str,
+) -> StreamingResponse:
+    try:
+        # Authz probe first so we never leak existence via stream errors.
+        paperless.assert_accessible(paperless_document_id, auth)
+        chunks, content_type, filename = paperless.stream_document_file(
+            auth, paperless_document_id, kind=kind  # type: ignore[arg-type]
+        )
+    except (PaperlessAuthError, PaperlessNotFoundError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found") from None
+    except PaperlessUnavailableError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Upstream document unavailable"
+        ) from None
+    except PaperlessError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Upstream document unavailable"
+        ) from None
+
+    media = (content_type or "application/octet-stream").split(";")[0].strip().lower()
+    if kind == "preview" and media not in {"application/pdf"} and not media.startswith("image/"):
+        # Drain/close the upstream stream without exposing bytes to the client.
+        for _ in chunks:
+            break
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Preview is only available for PDF and images",
+        )
+
+    safe_name = _safe_download_filename(filename, f"document-{paperless_document_id}")
+    headers = {
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'{disposition}; filename="{safe_name}"',
+    }
+    return StreamingResponse(chunks, media_type=content_type or "application/octet-stream", headers=headers)
+
+
+@api_router.get("/documents/{paperless_document_id}/preview")
+def preview_document(
+    request: Request,
+    paperless_document_id: int,
+    db: Session = Depends(get_db),
+    paperless: PaperlessClient = Depends(get_paperless_client),
+) -> StreamingResponse:
+    _ui_session, auth = _require_ui_auth(request, db)
+    return _stream_paperless_document(
+        auth=auth,
+        paperless=paperless,
+        paperless_document_id=paperless_document_id,
+        kind="preview",
+        disposition="inline",
+    )
+
+
+@api_router.get("/documents/{paperless_document_id}/download")
+def download_document(
+    request: Request,
+    paperless_document_id: int,
+    db: Session = Depends(get_db),
+    paperless: PaperlessClient = Depends(get_paperless_client),
+) -> StreamingResponse:
+    _ui_session, auth = _require_ui_auth(request, db)
+    return _stream_paperless_document(
+        auth=auth,
+        paperless=paperless,
+        paperless_document_id=paperless_document_id,
+        kind="download",
+        disposition="attachment",
+    )
 
 
 @api_router.post("/reconcile", response_model=ReconcileResponse)

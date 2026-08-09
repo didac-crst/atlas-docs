@@ -83,3 +83,24 @@ def test_get_task_pending(client: PaperlessClient, transport: FakePaperlessTrans
     status = client.get_task(task_id, "Token test")
     assert status.status == "PENDING"
     assert status.related_document_id is None
+
+
+def test_get_task_result_data_document_id(
+    client: PaperlessClient, transport: FakePaperlessTransport
+) -> None:
+    transport.success_document_id_in_result_data = True
+    task_id = client.post_document("Token test", filename="a.pdf", content=b"abc")
+    status = client.get_task(task_id, "Token test")
+    assert status.status == "SUCCESS"
+    assert status.related_document_id is not None
+    assert status.result_data == {"document_id": status.related_document_id}
+
+
+def test_get_task_success_without_document_id(
+    client: PaperlessClient, transport: FakePaperlessTransport
+) -> None:
+    transport.omit_related_document_on_success = True
+    task_id = client.post_document("Token test", filename="a.pdf", content=b"abc")
+    status = client.get_task(task_id, "Token test")
+    assert status.status == "SUCCESS"
+    assert PaperlessClient.primary_document_id(status) is None

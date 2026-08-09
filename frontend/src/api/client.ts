@@ -127,7 +127,13 @@ export type ReconcileSummary = {
   human_summary: string;
 };
 
-export type IngestJobState = "UPLOADING" | "PROCESSING" | "READY" | "FAILED";
+export type IngestJobState =
+  | "UPLOADING"
+  | "PROCESSING"
+  | "RESOLVING_DOCUMENT"
+  | "RETRYABLE_FAILURE"
+  | "READY"
+  | "FAILED";
 
 export type IngestJob = {
   id: string;
@@ -414,7 +420,26 @@ export function summarizeBulkResults(results: BulkRelationshipResult[]): string 
 }
 
 export function jobNeedsPolling(job: Pick<IngestJob, "state">): boolean {
-  return job.state === "UPLOADING" || job.state === "PROCESSING";
+  return (
+    job.state === "UPLOADING" ||
+    job.state === "PROCESSING" ||
+    job.state === "RESOLVING_DOCUMENT"
+  );
+}
+
+export function documentPreviewUrl(paperlessDocumentId: number): string {
+  return `/ui/api/documents/${paperlessDocumentId}/preview`;
+}
+
+export function documentDownloadUrl(paperlessDocumentId: number): string {
+  return `/ui/api/documents/${paperlessDocumentId}/download`;
+}
+
+export async function retryIngestJob(jobId: string, csrfToken: string): Promise<IngestJob> {
+  return apiFetch<IngestJob>(`/ui/api/ingest/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: "POST",
+    headers: { "X-CSRF-Token": csrfToken },
+  });
 }
 
 /** Document-to-document relationship type codes. */

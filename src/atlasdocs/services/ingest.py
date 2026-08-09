@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import tempfile
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import or_, select
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from atlasdocs.config import get_settings
 from atlasdocs.db.models import IngestionJob, IngestionJobState, as_aware, utcnow
+from atlasdocs.security.redact import safe_error_message
 from atlasdocs.security.tokens import decrypt_token, encrypt_token, token_fingerprint
 from atlasdocs.services.documents import (
     ConflictError,
@@ -29,6 +31,18 @@ from atlasdocs.services.paperless import (
     PaperlessDuplicateError,
     PaperlessUnavailableError,
 )
+
+logger = logging.getLogger(__name__)
+
+_PENDING_TASK_STATUSES = frozenset({"PENDING", "STARTED", "RETRY", "RECEIVED"})
+
+
+def correlation_key_for(job_id: uuid.UUID) -> str:
+    return f"atlasdocs:{job_id}"
+
+
+def task_id_fingerprint(task_id: str) -> str:
+    return hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:8]
 
 
 @dataclass(frozen=True)
@@ -200,6 +214,40 @@ class IngestionService:
             raise NotFoundError("Job not found")
         return _job_view(job)
 
+    def retry_job(self, job_id: str, authorization: str) -> IngestionJobView:
+        from atlasdocs.services.documents import NotFoundError
+
+        try:
+            uid = uuid.UUID(job_id)
+        except ValueError as exc:
+            raise ValidationError("Invalid job id") from exc
+        job = self._session.get(IngestionJob, uid)
+        if job is None or job.token_fingerprint != token_fingerprint(authorization):
+            raise NotFoundError("Job not found")
+        if job.state == IngestionJobState.failed:
+            raise ValidationError("Job failed terminally and cannot be retried")
+        if job.state != IngestionJobState.retryable_failure:
+            raise ValidationError("Job is not in a retryable state")
+
+        job.error_code = None
+        job.error_message = None
+        job.resolution_started_at = None
+        job.resolution_attempt_count = 0
+        job.next_attempt_at = utcnow()
+        job.locked_at = None
+        job.locked_by = None
+        job.updated_at = utcnow()
+
+        if job.paperless_task_id:
+            job.state = IngestionJobState.resolving_document
+        else:
+            if not spool_path_for(job.id).exists():
+                raise ValidationError("Upload spool missing")
+            job.state = IngestionJobState.uploading
+
+        self._session.flush()
+        return _job_view(job)
+
 
 class IngestionWorker:
     """Claim and process durable ingestion jobs."""
@@ -225,8 +273,6 @@ class IngestionWorker:
         if job is None:
             return False
         job_id = job.id
-        # Persist the lease before any Paperless I/O so a crash mid-call cannot
-        # leave the job unlocked for a second worker while upload is in flight.
         try:
             self._session.commit()
         except Exception:
@@ -245,8 +291,16 @@ class IngestionWorker:
                 if job is not None and job.state in {
                     IngestionJobState.uploading,
                     IngestionJobState.processing,
+                    IngestionJobState.resolving_document,
                 }:
-                    self._fail(job, "worker_error", "Unhandled worker error")
+                    message = safe_error_message(
+                        Exception("Unhandled worker error"),
+                        fallback="Unhandled worker error",
+                    )
+                    if spool_path_for(job.id).exists():
+                        self._fail_retryable(job, "worker_error", message)
+                    else:
+                        self._fail_terminal(job, "worker_error", message)
                     self._session.commit()
             except Exception:
                 self._session.rollback()
@@ -258,7 +312,6 @@ class IngestionWorker:
             try:
                 worked = self.run_once()
             except Exception:
-                # Keep the worker alive; the failed job is terminal or reclaimed by lease.
                 worked = False
             if not worked:
                 time.sleep(idle_sleep)
@@ -270,7 +323,11 @@ class IngestionWorker:
             select(IngestionJob)
             .where(
                 IngestionJob.state.in_(
-                    [IngestionJobState.uploading, IngestionJobState.processing]
+                    [
+                        IngestionJobState.uploading,
+                        IngestionJobState.processing,
+                        IngestionJobState.resolving_document,
+                    ]
                 ),
                 or_(
                     IngestionJob.next_attempt_at.is_(None),
@@ -298,37 +355,62 @@ class IngestionWorker:
 
     def _process(self, job: IngestionJob) -> None:
         if not job.token_ciphertext:
-            self._fail(job, "missing_token", "Job token unavailable")
+            self._fail_terminal(job, "missing_token", "Job token unavailable")
             return
         try:
             authorization = decrypt_token(
                 job.token_ciphertext, key=self._settings.token_encryption_key
             )
         except ValueError:
-            self._fail(job, "token_decrypt_failed", "Unable to decrypt job token")
+            self._fail_terminal(job, "token_decrypt_failed", "Unable to decrypt job token")
             return
 
         if job.state == IngestionJobState.uploading:
-            self._forward_upload(job, authorization)
-            if job.state == IngestionJobState.failed:
+            self._handle_uploading(job, authorization)
+            if job.state in {IngestionJobState.failed, IngestionJobState.retryable_failure}:
                 return
         if job.state == IngestionJobState.processing:
-            self._poll_task(job, authorization)
+            self._handle_processing(job, authorization)
+            if job.state in {IngestionJobState.failed, IngestionJobState.retryable_failure}:
+                return
+        if job.state == IngestionJobState.resolving_document:
+            self._handle_resolving(job, authorization)
 
-    def _forward_upload(self, job: IngestionJob, authorization: str) -> None:
+    def _handle_uploading(self, job: IngestionJob, authorization: str) -> None:
+        if job.paperless_task_id:
+            job.state = IngestionJobState.processing
+            if job.correlation_key is None:
+                job.correlation_key = correlation_key_for(job.id)
+            if job.processing_started_at is None:
+                job.processing_started_at = utcnow()
+            job.next_attempt_at = utcnow()
+            job.updated_at = utcnow()
+            self._session.flush()
+            logger.info(
+                "ingest job=%s task=%s state=%s",
+                job.id,
+                task_id_fingerprint(job.paperless_task_id),
+                job.state.value,
+            )
+            return
+
         path = spool_path_for(job.id)
         if not path.exists():
-            self._fail(job, "spool_missing", "Upload spool missing")
+            self._fail_terminal(job, "spool_missing", "Upload spool missing")
             return
+
         job.attempt_count += 1
+        correlation = correlation_key_for(job.id)
         try:
             with path.open("rb") as handle:
                 task_id = self._paperless.post_document(
                     authorization,
                     filename=job.original_filename,
                     content=handle,
+                    title=correlation,
                 )
             job.paperless_task_id = task_id
+            job.correlation_key = correlation
             job.state = IngestionJobState.processing
             if job.processing_started_at is None:
                 job.processing_started_at = utcnow()
@@ -336,18 +418,21 @@ class IngestionWorker:
             job.error_code = None
             job.error_message = None
             job.next_attempt_at = utcnow()
-            path.unlink(missing_ok=True)
             self._session.flush()
+            logger.info(
+                "ingest job=%s task=%s state=%s",
+                job.id,
+                task_id_fingerprint(task_id),
+                job.state.value,
+            )
         except PaperlessDuplicateError:
-            path.unlink(missing_ok=True)
-            self._fail(job, "duplicate", "Paperless rejected duplicate document")
+            self._fail_terminal(job, "duplicate", "Paperless rejected duplicate document")
         except PaperlessAuthError:
-            path.unlink(missing_ok=True)
-            self._fail(job, "paperless_unauthorized", "Paperless authorization failed")
+            self._fail_terminal(job, "paperless_unauthorized", "Paperless authorization failed")
         except PaperlessUnavailableError as exc:
+            message = safe_error_message(exc, fallback="Paperless upload unavailable")
             if job.attempt_count >= self._settings.ingest_max_attempts:
-                path.unlink(missing_ok=True)
-                self._fail(job, "upstream_error", str(exc)[:500])
+                self._fail_terminal(job, "upstream_error", message)
             else:
                 delay = min(60, 2 ** job.attempt_count)
                 job.next_attempt_at = utcnow() + timedelta(seconds=delay)
@@ -356,26 +441,29 @@ class IngestionWorker:
                 job.updated_at = utcnow()
                 self._session.flush()
         except Exception as exc:  # noqa: BLE001 — terminal unexpected
-            path.unlink(missing_ok=True)
-            self._fail(job, "upload_failed", str(exc)[:500])
+            self._fail_terminal(
+                job,
+                "upload_failed",
+                safe_error_message(exc, fallback="Upload failed"),
+            )
 
-    def _poll_task(self, job: IngestionJob, authorization: str) -> None:
+    def _handle_processing(self, job: IngestionJob, authorization: str) -> None:
         if not job.paperless_task_id:
-            self._fail(job, "missing_task", "Missing Paperless task id")
+            self._fail_terminal(job, "missing_task", "Missing Paperless task id")
             return
         if job.processing_started_at is None:
-            # Legacy rows or interrupted upgrades: start the clock on first poll.
             job.processing_started_at = utcnow()
             self._session.flush()
         if as_aware(job.processing_started_at) + timedelta(
             seconds=self._settings.ingest_processing_timeout_seconds
         ) < utcnow():
-            self._fail(job, "processing_timeout", "Processing timed out")
+            self._fail_terminal(job, "processing_timeout", "Processing timed out")
             return
+
         try:
             status = self._paperless.get_task(job.paperless_task_id, authorization)
         except PaperlessAuthError:
-            self._fail(job, "paperless_unauthorized", "Paperless authorization failed")
+            self._fail_terminal(job, "paperless_unauthorized", "Paperless authorization failed")
             return
         except PaperlessUnavailableError:
             job.next_attempt_at = utcnow() + timedelta(seconds=2)
@@ -385,7 +473,15 @@ class IngestionWorker:
             self._session.flush()
             return
 
-        if status.status in {"PENDING", "STARTED", "RETRY", "RECEIVED"}:
+        logger.info(
+            "ingest job=%s task=%s state=%s task_status=%s",
+            job.id,
+            task_id_fingerprint(job.paperless_task_id),
+            job.state.value,
+            status.status,
+        )
+
+        if status.status in _PENDING_TASK_STATUSES:
             job.next_attempt_at = utcnow() + timedelta(seconds=1)
             job.locked_at = None
             job.locked_by = None
@@ -394,36 +490,122 @@ class IngestionWorker:
             return
 
         if status.status == "FAILURE":
-            msg = (status.result or "Paperless task failed")[:500]
-            self._fail(job, "paperless_task_failed", msg)
+            self._fail_terminal(job, "paperless_task_failed", "Paperless task failed")
             return
 
         if status.status == "SUCCESS":
-            doc_id = status.related_document_id
-            if doc_id is None:
-                self._fail(job, "missing_document", "Task succeeded without document id")
+            doc_id = self._paperless.primary_document_id(status)
+            if doc_id is not None:
+                self._complete_with_document(job, authorization, doc_id)
                 return
-            try:
-                self._paperless.assert_accessible(doc_id, authorization)
-            except PaperlessAuthError:
-                self._fail(job, "paperless_unauthorized", "Document inaccessible after consume")
-                return
-            entity = self._documents.get_or_create_document_entity(doc_id)
-            job.paperless_document_id = doc_id
-            job.entity_id = entity.id
-            job.state = IngestionJobState.ready
-            job.token_ciphertext = None
+            job.state = IngestionJobState.resolving_document
+            if job.resolution_started_at is None:
+                job.resolution_started_at = utcnow()
+            job.next_attempt_at = utcnow()
             job.locked_at = None
             job.locked_by = None
             job.updated_at = utcnow()
-            job.error_code = None
-            job.error_message = None
             self._session.flush()
             return
 
-        self._fail(job, "unknown_task_status", f"Unexpected task status {status.status}")
+        self._fail_terminal(job, "unknown_task_status", f"Unexpected task status {status.status}")
 
-    def _fail(self, job: IngestionJob, code: str, message: str) -> None:
+    def _handle_resolving(self, job: IngestionJob, authorization: str) -> None:
+        if not job.paperless_task_id:
+            self._fail_terminal(job, "missing_task", "Missing Paperless task id")
+            return
+        if job.resolution_started_at is None:
+            job.resolution_started_at = utcnow()
+            self._session.flush()
+
+        job.resolution_attempt_count += 1
+
+        resolution_deadline = as_aware(job.resolution_started_at) + timedelta(
+            seconds=self._settings.ingest_resolution_timeout_seconds
+        )
+        if resolution_deadline < utcnow():
+            self._fail_retryable(
+                job,
+                "missing_document",
+                "Could not resolve Paperless document id",
+            )
+            return
+        if job.resolution_attempt_count > self._settings.ingest_resolution_max_attempts:
+            self._fail_retryable(
+                job,
+                "missing_document",
+                "Could not resolve Paperless document id",
+            )
+            return
+
+        correlation = job.correlation_key or correlation_key_for(job.id)
+        doc_id: int | None = None
+
+        try:
+            status = self._paperless.get_task(job.paperless_task_id, authorization)
+            doc_id = self._paperless.primary_document_id(status)
+            if doc_id is None:
+                doc_id = self._paperless.find_document_id_by_title(authorization, correlation)
+        except PaperlessAuthError:
+            self._fail_terminal(job, "paperless_unauthorized", "Paperless authorization failed")
+            return
+        except PaperlessUnavailableError:
+            delay = min(60, 2 ** min(job.resolution_attempt_count, 6))
+            job.next_attempt_at = utcnow() + timedelta(seconds=delay)
+            job.locked_at = None
+            job.locked_by = None
+            job.updated_at = utcnow()
+            self._session.flush()
+            return
+
+        logger.info(
+            "ingest job=%s task=%s state=%s resolution_attempt=%s",
+            job.id,
+            task_id_fingerprint(job.paperless_task_id),
+            job.state.value,
+            job.resolution_attempt_count,
+        )
+
+        if doc_id is not None:
+            self._complete_with_document(job, authorization, doc_id)
+            return
+
+        delay = min(60, 2 ** min(job.resolution_attempt_count, 6))
+        job.next_attempt_at = utcnow() + timedelta(seconds=delay)
+        job.locked_at = None
+        job.locked_by = None
+        job.updated_at = utcnow()
+        self._session.flush()
+
+    def _complete_with_document(
+        self, job: IngestionJob, authorization: str, doc_id: int
+    ) -> None:
+        try:
+            self._paperless.assert_accessible(doc_id, authorization)
+        except PaperlessAuthError:
+            self._fail_terminal(job, "paperless_unauthorized", "Document inaccessible after consume")
+            return
+        entity = self._documents.get_or_create_document_entity(doc_id)
+        job.paperless_document_id = doc_id
+        job.entity_id = entity.id
+        job.state = IngestionJobState.ready
+        job.token_ciphertext = None
+        job.locked_at = None
+        job.locked_by = None
+        job.updated_at = utcnow()
+        job.error_code = None
+        job.error_message = None
+        spool_path_for(job.id).unlink(missing_ok=True)
+        self._session.flush()
+        logger.info(
+            "ingest job=%s task=%s state=%s document_id=%s",
+            job.id,
+            task_id_fingerprint(job.paperless_task_id or ""),
+            job.state.value,
+            doc_id,
+        )
+
+    def _fail_terminal(self, job: IngestionJob, code: str, message: str) -> None:
         job.state = IngestionJobState.failed
         job.error_code = code[:64]
         job.error_message = message[:512]
@@ -433,3 +615,26 @@ class IngestionWorker:
         job.updated_at = utcnow()
         spool_path_for(job.id).unlink(missing_ok=True)
         self._session.flush()
+        logger.info(
+            "ingest job=%s task=%s state=%s error_code=%s",
+            job.id,
+            task_id_fingerprint(job.paperless_task_id or ""),
+            job.state.value,
+            job.error_code,
+        )
+
+    def _fail_retryable(self, job: IngestionJob, code: str, message: str) -> None:
+        job.state = IngestionJobState.retryable_failure
+        job.error_code = code[:64]
+        job.error_message = message[:512]
+        job.locked_at = None
+        job.locked_by = None
+        job.updated_at = utcnow()
+        self._session.flush()
+        logger.info(
+            "ingest job=%s task=%s state=%s error_code=%s",
+            job.id,
+            task_id_fingerprint(job.paperless_task_id or ""),
+            job.state.value,
+            job.error_code,
+        )

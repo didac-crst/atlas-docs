@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
-from typing import BinaryIO
-from urllib.parse import urlencode
+from typing import BinaryIO, Iterator, Literal
 
 import httpx
+
+from atlasdocs.security.redact import redact_secrets
+
+_CONTENT_DISPOSITION_FILENAME = re.compile(
+    r"""filename\*=UTF-8''([^;]+)|filename="([^"]+)"|filename=([^;\s]+)""",
+    re.IGNORECASE,
+)
+
+_RESULT_DATA_KEYS = frozenset({"document_id", "duplicate_of"})
 
 
 class PaperlessError(Exception):
@@ -51,7 +61,9 @@ class PaperlessTaskStatus:
     task_id: str
     status: str  # PENDING | STARTED | SUCCESS | FAILURE | ...
     related_document_id: int | None = None
+    related_document_ids: tuple[int, ...] = ()
     result: str | None = None
+    result_data: dict | None = None
 
 
 def _label_from_field(value: object) -> str | None:
@@ -69,6 +81,85 @@ def _label_from_field(value: object) -> str | None:
     return None
 
 
+def _coerce_document_id(value: object) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _safe_short_string(value: object, *, limit: int = 200) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    text = redact_secrets(value).strip()
+    if not text:
+        return None
+    return text[:limit]
+
+
+def _safe_result_data(value: object) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    safe: dict = {}
+    for key in _RESULT_DATA_KEYS:
+        if key in value:
+            safe[key] = value[key]
+    return safe or None
+
+
+def _extract_document_ids_from_task_row(row: dict) -> list[int]:
+    """Collect document ids from a Paperless task row in deterministic order."""
+    ids: list[int] = []
+    seen: set[int] = set()
+
+    def add(value: object) -> None:
+        doc_id = _coerce_document_id(value)
+        if doc_id is not None and doc_id not in seen:
+            seen.add(doc_id)
+            ids.append(doc_id)
+
+    add(row.get("related_document"))
+
+    related_ids = row.get("related_document_ids")
+    if isinstance(related_ids, list):
+        for item in related_ids:
+            add(item)
+
+    result_data = row.get("result_data")
+    if isinstance(result_data, dict):
+        add(result_data.get("document_id"))
+
+    result = row.get("result")
+    if isinstance(result, str):
+        stripped = result.strip()
+        if stripped.isdigit():
+            add(stripped)
+        else:
+            try:
+                parsed = json.loads(stripped)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                parsed = None
+            if isinstance(parsed, dict):
+                add(parsed.get("document_id"))
+
+    return ids
+
+
+def _filename_from_content_disposition(header: str | None) -> str | None:
+    if not header:
+        return None
+    match = _CONTENT_DISPOSITION_FILENAME.search(header)
+    if not match:
+        return None
+    for group in match.groups():
+        if group:
+            return group.strip()
+    return None
+
+
 class PaperlessClient:
     """Thin REST adapter. Never touches Paperless databases or filesystems."""
 
@@ -83,6 +174,13 @@ class PaperlessClient:
         self._transport = transport
         self._correspondent_names: dict[int, str | None] = {}
         self._document_type_names: dict[int, str | None] = {}
+
+    @staticmethod
+    def primary_document_id(status: PaperlessTaskStatus) -> int | None:
+        """Return the first deterministic document id from a task status, if any."""
+        if status.related_document_ids:
+            return status.related_document_ids[0]
+        return status.related_document_id
 
     def _headers(self, token: str | None = None) -> dict[str, str]:
         if not token:
@@ -128,7 +226,7 @@ class PaperlessClient:
         if response.status_code >= 500:
             raise PaperlessUnavailableError(f"Paperless returned HTTP {response.status_code}")
         if response.status_code >= 400:
-            body = (response.text or "").lower()
+            body = redact_secrets((response.text or "")[:500]).lower()
             if "duplicate" in body:
                 raise PaperlessDuplicateError("Paperless rejected duplicate document")
             raise PaperlessUnavailableError(f"Paperless returned HTTP {response.status_code}")
@@ -239,6 +337,8 @@ class PaperlessClient:
         document_type: str | None = None,
         tag: str | None = None,
     ) -> PaperlessDocumentPage:
+        from urllib.parse import urlencode
+
         params: dict[str, str | int] = {"page": page, "page_size": page_size}
         if query:
             params["query"] = query
@@ -281,6 +381,30 @@ class PaperlessClient:
         except PaperlessUnavailableError:
             raise
 
+    def find_document_id_by_title(self, token: str, title: str) -> int | None:
+        """Return a document id only when title matches exactly one Paperless document."""
+        from urllib.parse import urlencode
+
+        params = {"title__iexact": title, "page_size": 2}
+        url = f"{self._base_url}/api/documents/?{urlencode(params)}"
+        response = self._request("GET", url, token)
+        self._raise_for_status(response)
+        payload = self._parse_json(response)
+        if not isinstance(payload, dict):
+            raise PaperlessUnavailableError("Paperless returned malformed document list")
+        raw_results = payload.get("results")
+        if not isinstance(raw_results, list):
+            raise PaperlessUnavailableError("Paperless document list has invalid results")
+        if len(raw_results) != 1:
+            return None
+        row = raw_results[0]
+        if not isinstance(row, dict) or "id" not in row:
+            raise PaperlessUnavailableError("Paperless document list has invalid results")
+        try:
+            return int(row["id"])
+        except (TypeError, ValueError) as exc:
+            raise PaperlessUnavailableError("Paperless document list has invalid results") from exc
+
     def post_document(
         self,
         token: str,
@@ -288,13 +412,22 @@ class PaperlessClient:
         filename: str,
         content: bytes | BinaryIO,
         content_type: str = "application/octet-stream",
+        title: str | None = None,
     ) -> str:
         """Upload via POST /api/documents/post_document/; return Paperless task id."""
         url = f"{self._base_url}/api/documents/post_document/"
         files = {"document": (filename, content, content_type)}
-        response = self._request("POST", url, token, files=files)
+        form: dict[str, str] = {}
+        if title is not None:
+            form["title"] = title
+        response = self._request(
+            "POST",
+            url,
+            token,
+            files=files,
+            data=form or None,
+        )
         self._raise_for_status(response)
-        # Paperless may return a bare UUID string or JSON.
         text = (response.text or "").strip().strip('"')
         if text and "\n" not in text and len(text) < 80 and "{" not in text:
             return text
@@ -309,6 +442,8 @@ class PaperlessClient:
         raise PaperlessUnavailableError("Paperless post_document response missing task id")
 
     def get_task(self, task_id: str, token: str) -> PaperlessTaskStatus:
+        from urllib.parse import urlencode
+
         url = f"{self._base_url}/api/tasks/?{urlencode({'task_id': task_id})}"
         response = self._request("GET", url, token)
         self._raise_for_status(response)
@@ -326,22 +461,69 @@ class PaperlessClient:
         if not isinstance(row, dict):
             raise PaperlessUnavailableError("Paperless task row malformed")
         status = str(row.get("status") or row.get("state") or "PENDING").upper()
-        related = row.get("related_document")
-        related_id: int | None = None
-        if isinstance(related, int):
-            related_id = related
-        elif isinstance(related, str) and related.isdigit():
-            related_id = int(related)
-        result = row.get("result")
-        result_text = result if isinstance(result, str) else None
-        if related_id is None and result_text and result_text.isdigit():
-            related_id = int(result_text)
+        document_ids = _extract_document_ids_from_task_row(row)
+        related_id = document_ids[0] if document_ids else None
+        result_data = _safe_result_data(row.get("result_data"))
+        result_text = _safe_short_string(row.get("result"))
         return PaperlessTaskStatus(
             task_id=task_id,
             status=status,
             related_document_id=related_id,
+            related_document_ids=tuple(document_ids),
             result=result_text,
+            result_data=result_data,
         )
+
+    def stream_document_file(
+        self,
+        token: str,
+        document_id: int,
+        *,
+        kind: Literal["preview", "download"],
+    ) -> tuple[Iterator[bytes], str, str | None]:
+        """Stream preview or download bytes from Paperless without logging the body."""
+        suffix = "preview" if kind == "preview" else "download"
+        url = f"{self._base_url}/api/documents/{document_id}/{suffix}/"
+        try:
+            client = httpx.Client(timeout=self._timeout, transport=self._transport)
+            response = client.send(
+                client.build_request("GET", url, headers=self._headers(token)),
+                stream=True,
+            )
+        except httpx.TimeoutException as exc:
+            raise PaperlessUnavailableError("Paperless request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise PaperlessUnavailableError("Paperless request failed") from exc
+
+        if response.status_code in {401, 403}:
+            response.close()
+            client.close()
+            raise PaperlessAuthError(f"Access denied for Paperless document {document_id}")
+        if response.status_code == 404:
+            response.close()
+            client.close()
+            raise PaperlessNotFoundError(f"Paperless document {document_id} not found")
+        if response.status_code >= 500:
+            response.close()
+            client.close()
+            raise PaperlessUnavailableError(f"Paperless returned HTTP {response.status_code}")
+        if response.status_code >= 400:
+            response.close()
+            client.close()
+            raise PaperlessUnavailableError(f"Paperless returned HTTP {response.status_code}")
+
+        content_type = response.headers.get("content-type") or "application/octet-stream"
+        filename = _filename_from_content_disposition(response.headers.get("content-disposition"))
+
+        def iter_bytes() -> Iterator[bytes]:
+            try:
+                for chunk in response.iter_bytes():
+                    yield chunk
+            finally:
+                response.close()
+                client.close()
+
+        return iter_bytes(), content_type, filename
 
     def document_exists(self, document_id: int, token: str) -> bool:
         self.get_document(document_id, token=token)

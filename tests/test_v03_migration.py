@@ -211,7 +211,7 @@ def test_sqlite_upgrade_preserves_entities_and_references_184_197(
 
     with engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert version == "0004_ingest_processing_started_at"
+        assert version == "0005_ingest_resolve_states"
 
 
 def test_sqlite_downgrade_round_trips_when_safe(
@@ -342,7 +342,7 @@ def test_postgres_upgrade_preserves_entities_and_references_184_197(
 
         with engine.connect() as conn:
             version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert version == "0004_ingest_processing_started_at"
+            assert version == "0005_ingest_resolve_states"
             length = conn.execute(
                 text(
                     """
