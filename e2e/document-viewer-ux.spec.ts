@@ -20,7 +20,7 @@ test("viewer open/close, escape, overflow trash, and no token leak", async ({ pa
     timeout: 15_000,
   });
 
-  const payslipCard = page.locator(".doc-card").filter({ hasText: /Payslip Germany/i });
+  const payslipCard = page.locator(".doc-card").filter({ hasText: /Payslip Germany/i }).first();
   await expect(payslipCard).toBeVisible({ timeout: 15_000 });
   await payslipCard.getByRole("button", { name: /^Document details$/i }).click();
   await expect(page.getByRole("dialog")).toBeVisible({ timeout: 15_000 });
@@ -50,9 +50,9 @@ test("viewer open/close, escape, overflow trash, and no token leak", async ({ pa
   await expect(technical).toContainText("184");
 
   await dialog.getByRole("button", { name: /More actions/i }).click();
-  await expect(page.getByRole("menuitem", { name: /Open in Paperless/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Open in Paperless/i })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("menuitem", { name: /Open in Paperless/i })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Open in Paperless/i })).toHaveCount(0);
   await expect(dialog).toBeVisible();
 
   await dialog.getByRole("button", { name: /^Move to trash$/i }).click();

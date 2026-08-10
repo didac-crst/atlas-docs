@@ -213,7 +213,7 @@ export function DocumentActions({
                 <Download size={16} aria-hidden /> Download original
               </OverflowItem>
               {versions.length > 0 ? (
-                <div className="overflow-menu-section" role="none">
+                <div className="overflow-menu-section">
                   <label className="field overflow-version-field">
                     <span>Version</span>
                     <select
@@ -251,7 +251,7 @@ export function DocumentActions({
               <ExternalLink size={16} aria-hidden /> Open in Paperless
             </OverflowItem>
           ) : (
-            <button type="button" role="menuitem" className="overflow-menu-item" disabled>
+            <button type="button" className="overflow-menu-item" disabled>
               <ExternalLink size={16} aria-hidden /> Open in Paperless
             </button>
           )}
@@ -362,7 +362,6 @@ function OverflowItem({
   if (href) {
     return (
       <a
-        role="menuitem"
         className="overflow-menu-item"
         href={href}
         download={download || undefined}
@@ -374,7 +373,7 @@ function OverflowItem({
     );
   }
   return (
-    <button type="button" role="menuitem" className="overflow-menu-item" onClick={onSelect}>
+    <button type="button" className="overflow-menu-item" onClick={onSelect}>
       {children}
     </button>
   );

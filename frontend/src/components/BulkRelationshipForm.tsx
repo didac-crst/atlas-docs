@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import { Waypoints } from "lucide-react";
 import {
   bulkAddRelationships,
@@ -227,7 +227,7 @@ export function BulkRelationshipForm({
           <ul className="suggestions" id={listId} role="listbox">
             {suggestions.map((item, index) => (
               <li
-                key={item.id}
+                key={item.id ?? `paperless-${item.paperless_document_id ?? index}`}
                 id={`${listId}-option-${index}`}
                 role="option"
                 aria-selected={index === highlight}

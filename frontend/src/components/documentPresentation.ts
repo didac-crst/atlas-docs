@@ -7,7 +7,7 @@ export type DocumentPresentation = {
   correspondent: string | null;
   createdDate: string | null;
   createdDateLabel: string | null;
-  relationshipCount: number;
+  relationshipCount: number | null;
   knowledgeContext: string | null;
   semanticCompleteness: string;
   entityType: string;
@@ -63,13 +63,19 @@ export function toDocumentPresentation(item: ExploreResultItem): DocumentPresent
     correspondent: item.correspondent,
     createdDate: item.created_date,
     createdDateLabel: formatDocumentDate(item.created_date),
-    relationshipCount: item.relationship_count ?? item.relationship_summary.length,
+    relationshipCount:
+      item.relationship_count === null
+        ? null
+        : typeof item.relationship_count === "number"
+          ? item.relationship_count
+          : item.relationship_summary.length,
     knowledgeContext: knowledgeContextFromSummary(item.relationship_summary),
     semanticCompleteness: item.semantic_completeness,
     entityType: item.entity_type,
     previewAvailable: item.preview_available,
     downloadAvailable: item.download_available,
-    thumbnailAvailable: item.thumbnail_available !== false && item.preview_available,
+    // Dedicated raster thumbnail BFF is not available yet; never treat PDF preview as an image.
+    thumbnailAvailable: false,
     openUrl: item.open_url,
     entityId: item.id,
   };

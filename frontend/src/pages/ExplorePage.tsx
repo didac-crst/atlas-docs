@@ -441,6 +441,7 @@ export function ExplorePage({ session: _session }: Props) {
             type="button"
             className="btn btn-secondary atlas-control"
             aria-expanded={filtersOpen}
+            aria-controls="explore-filter-panel"
             onClick={() => setFiltersOpen((value) => !value)}
           >
             <AtlasIcon name="filters" size={16} /> Filters
@@ -470,8 +471,8 @@ export function ExplorePage({ session: _session }: Props) {
 
         <FilterChips chips={activeChips} onRemove={removeChip} onClearAll={clearAllFilters} />
 
-        {filtersOpen ? (
-          <div className="explore-filter-panel">
+          {filtersOpen ? (
+            <div className="explore-filter-panel" id="explore-filter-panel">
             {showDocumentFilters ? (
               <fieldset className="explore-filter-group">
                 <legend>Document</legend>

@@ -17,6 +17,7 @@
   --atlas-docs-s: #1ea6b1;
   --background: #f7f9fc;
   --surface: #ffffff;
+  --surface-elevated: #ffffff;
   --surface-alt: #f1f5f9;
   --text-primary: #102644;
   --text-secondary: #4f647b;
@@ -1915,6 +1916,7 @@ button.doc-card-title-btn:hover {
 .doc-card-title {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin: 0;
@@ -1969,6 +1971,7 @@ button.doc-card-title-btn:hover {
 .doc-card-knowledge span {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

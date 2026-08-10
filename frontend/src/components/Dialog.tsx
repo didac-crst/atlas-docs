@@ -10,6 +10,9 @@ type Props = {
   role?: "dialog" | "alertdialog";
 };
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function Dialog({
   title,
   onClose,
@@ -20,7 +23,13 @@ export function Dialog({
 }: Props) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     previouslyFocused.current = document.activeElement as HTMLElement | null;
@@ -29,7 +38,23 @@ export function Dialog({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        event.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !panelRef.current) return;
+      const nodes = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE),
+      ).filter((el) => el.getClientRects().length > 0);
+      if (nodes.length === 0) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     }
 
@@ -41,12 +66,18 @@ export function Dialog({
       document.body.style.overflow = previousOverflow;
       previouslyFocused.current?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="dialog-root" role="presentation">
-      <button type="button" className="dialog-backdrop" aria-label="Close dialog" onClick={onClose} />
+      <button
+        type="button"
+        className="dialog-backdrop"
+        aria-label="Close dialog"
+        onClick={() => onCloseRef.current()}
+      />
       <div
+        ref={panelRef}
         className={[
           "dialog-panel",
           fullScreenMobile ? "dialog-panel-mobile-full" : "",
@@ -66,7 +97,7 @@ export function Dialog({
             ref={closeRef}
             type="button"
             className="btn btn-ghost dialog-close"
-            onClick={onClose}
+            onClick={() => onCloseRef.current()}
           >
             Close
           </button>

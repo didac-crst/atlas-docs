@@ -118,6 +118,7 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   await page.getByRole("button", { name: /^Apply$/i }).click();
   await expect(page.getByText(/No unclassified documents|No documents|shown/i).first()).toBeVisible();
 
+  await expect(page.locator(".doc-card").first()).toBeVisible();
   await page.getByRole("button", { name: /Select visible/i }).click();
   await expect(page.getByRole("region", { name: /Batch actions/i })).toBeVisible();
   await page.getByRole("button", { name: /Add relationship/i }).click();
@@ -144,14 +145,15 @@ test("password login, home, ingest, classify without leaking secrets", async ({ 
   );
   await expect(dialog.getByRole("button", { name: /^Move to trash$/i })).toBeVisible();
   await dialog.getByRole("button", { name: /More actions/i }).click();
-  const paperless = page.getByRole("menuitem", { name: /Open in Paperless/i });
+  const paperless = page.getByRole("link", { name: /Open in Paperless/i });
   await expect(paperless).toHaveAttribute(
     "href",
     "http://paperless.example.test/documents/184/",
   );
   await expect(paperless).toHaveAttribute("target", "_blank");
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("menuitem", { name: /Open in Paperless/i })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Open in Paperless/i })).toHaveCount(0);
+  await expect(dialog).toBeVisible();
 
   await dialog.getByRole("button", { name: /^Move to trash$/i }).click();
   await expect(page.getByRole("alertdialog")).toBeVisible();

@@ -17,7 +17,11 @@ export function AtlasDocsWordmark({
   const classes = ["atlas-docs-wordmark", className].filter(Boolean).join(" ");
   // Spans must be adjacent (no whitespace) so the accessible name is “AtlasDocs”.
   return (
-    <Tag className={classes} aria-label={labelled ? "AtlasDocs" : undefined}>
+    <Tag
+      className={classes}
+      aria-label={labelled ? "AtlasDocs" : undefined}
+      aria-hidden={labelled ? undefined : true}
+    >
       <span className="atlas-docs-wordmark-atlas">Atlas</span><span className="atlas-docs-wordmark-d">D</span><span className="atlas-docs-wordmark-o">o</span><span className="atlas-docs-wordmark-c">c</span><span className="atlas-docs-wordmark-s">s</span>
     </Tag>
   );

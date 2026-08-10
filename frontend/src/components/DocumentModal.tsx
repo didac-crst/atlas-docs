@@ -51,28 +51,37 @@ export function DocumentModal({
   const editable = mode === "classify";
 
   useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
     setStatus("loading");
     (async () => {
       try {
-        const response = await fetch(src, { credentials: "same-origin" });
+        const response = await fetch(src, {
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
         if (cancelled) return;
         if (!response.ok) {
           setStatus("error");
+          await response.body?.cancel();
           return;
         }
         const type = response.headers.get("content-type") || "";
+        // Headers are enough — do not download the full PDF body for the probe.
+        await response.body?.cancel();
         if (!type.startsWith("application/pdf") && !type.startsWith("image/")) {
           setStatus("error");
           return;
         }
         setStatus("ready");
-      } catch {
-        if (!cancelled) setStatus("error");
+      } catch (err) {
+        if (cancelled || (err instanceof DOMException && err.name === "AbortError")) return;
+        setStatus("error");
       }
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [src]);
 

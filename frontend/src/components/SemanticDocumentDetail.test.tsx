@@ -108,6 +108,7 @@ describe("SemanticDocumentDetail document actions", () => {
     const frame = document.querySelector("iframe.doc-preview-frame");
     expect(frame).not.toBeNull();
     expect(frame).toHaveAttribute("src", "/ui/api/documents/184/preview");
+    // Empty sandbox blocks the browser PDF viewer; same-origin BFF is intentional.
     expect(frame).not.toHaveAttribute("sandbox");
 
     expect(screen.getByRole("link", { name: /^Download$/i })).toHaveAttribute(
@@ -119,16 +120,16 @@ describe("SemanticDocumentDetail document actions", () => {
     expect(screen.queryByText(/^Document 184$/)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /More actions/i }));
-    expect(screen.getByRole("menuitem", { name: /Open preview in new tab/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Open preview in new tab/i })).toHaveAttribute(
       "href",
       "/ui/api/documents/184/preview",
     );
-    expect(screen.getByRole("menuitem", { name: /Download original/i })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Open in Paperless/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Download original/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open in Paperless/i })).toHaveAttribute(
       "href",
       "https://docs.example.test/documents/184/",
     );
-    expect(screen.getByRole("menuitem", { name: /Replace document/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Replace document/i })).toBeInTheDocument();
   });
 
   it("disables Paperless action when open_url is missing", async () => {
@@ -144,8 +145,8 @@ describe("SemanticDocumentDetail document actions", () => {
       </MemoryRouter>,
     );
     await user.click(screen.getByRole("button", { name: /More actions/i }));
-    expect(screen.getByRole("menuitem", { name: /Open in Paperless/i })).toBeDisabled();
-    expect(screen.getByRole("menuitem", { name: /Open preview in new tab/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open in Paperless/i })).toBeDisabled();
+    expect(screen.getByRole("link", { name: /Open preview in new tab/i })).toBeInTheDocument();
   });
 
   it("keeps Paperless id in collapsed technical details only", () => {

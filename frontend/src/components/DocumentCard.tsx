@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 import type { ExploreResultItem } from "../api/client";
-import { documentPreviewUrl } from "../api/client";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { AtlasIcon } from "./atlasIcons";
 import { DocumentActionBar } from "./DocumentActionBar";
@@ -43,6 +42,14 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
   );
 }
 
+function ThumbFallback({ size }: { size: number }) {
+  return (
+    <span className="doc-card-thumb-fallback" aria-hidden>
+      <AtlasIcon name="document" size={size} />
+    </span>
+  );
+}
+
 /** Shared document/entity result card — compact grid or scan-oriented list. */
 export function DocumentCard({
   item,
@@ -59,7 +66,6 @@ export function DocumentCard({
     : doc.entityId
       ? `/entities/${doc.entityId}`
       : null;
-  const showThumb = isDocument && doc.thumbnailAvailable;
 
   function openDetails() {
     if (isDocument && onPreview && doc.paperlessDocumentId != null) {
@@ -75,6 +81,7 @@ export function DocumentCard({
 
   function onCardKeyDown(event: KeyboardEvent) {
     if (!selectable || !isDocument) return;
+    if (isInteractiveTarget(event.target)) return;
     if (event.key === " " || event.key === "Enter") {
       event.preventDefault();
       onToggleSelect?.();
@@ -104,6 +111,15 @@ export function DocumentCard({
       </strong>
     );
 
+  const relationshipMeta =
+    doc.relationshipCount != null ? (
+      <DocumentMetaItem
+        icon={isDocument ? "relationship" : "knowledge"}
+        label="Relationships"
+        value={`${doc.relationshipCount} relationship${doc.relationshipCount === 1 ? "" : "s"}`}
+      />
+    ) : null;
+
   const meta = (
     <div className="doc-card-meta-row">
       {doc.correspondent ? (
@@ -112,19 +128,7 @@ export function DocumentCard({
       {doc.createdDateLabel ? (
         <DocumentMetaItem icon="date" label="Created date" value={doc.createdDateLabel} />
       ) : null}
-      {isDocument ? (
-        <DocumentMetaItem
-          icon="relationship"
-          label="Relationships"
-          value={`${doc.relationshipCount} relationship${doc.relationshipCount === 1 ? "" : "s"}`}
-        />
-      ) : (
-        <DocumentMetaItem
-          icon="knowledge"
-          label="Relationships"
-          value={`${doc.relationshipCount} relationship${doc.relationshipCount === 1 ? "" : "s"}`}
-        />
-      )}
+      {relationshipMeta}
       {!doc.correspondent && !doc.createdDateLabel && item.subtitle ? (
         <span className="doc-meta-item muted">{item.subtitle}</span>
       ) : null}
@@ -151,13 +155,7 @@ export function DocumentCard({
 
         {isDocument ? (
           <div className="doc-card-thumb doc-card-thumb-list" aria-hidden>
-            {showThumb ? (
-              <img src={documentPreviewUrl(doc.paperlessDocumentId!)} alt="" loading="lazy" />
-            ) : (
-              <span className="doc-card-thumb-fallback">
-                <AtlasIcon name="document" size={18} />
-              </span>
-            )}
+            <ThumbFallback size={18} />
           </div>
         ) : (
           <div className="doc-card-thumb doc-card-thumb-list doc-card-thumb-entity" aria-hidden>
@@ -192,6 +190,8 @@ export function DocumentCard({
     );
   }
 
+  const gridThumbInner = <ThumbFallback size={22} />;
+
   return (
     <article
       className={`doc-card doc-card-grid${selected ? " doc-card-selected" : ""}${
@@ -211,28 +211,37 @@ export function DocumentCard({
 
       {isDocument ? (
         <div className="doc-card-preview">
-          {(doc.documentType || typeLabel(item.entity_type)) ? (
+          {doc.documentType || typeLabel(item.entity_type) ? (
             <span className="entity-chip doc-card-type-pill" data-kind="document">
               {doc.documentType || typeLabel(item.entity_type)}
             </span>
           ) : null}
-          <button
-            type="button"
-            className="doc-card-thumb"
-            aria-label={`Document details for ${doc.title}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              openDetails();
-            }}
-          >
-            {showThumb ? (
-              <img src={documentPreviewUrl(doc.paperlessDocumentId!)} alt="" loading="lazy" />
-            ) : (
-              <span className="doc-card-thumb-fallback" aria-hidden>
-                <AtlasIcon name="document" size={22} />
-              </span>
-            )}
-          </button>
+          {onPreview ? (
+            <button
+              type="button"
+              className="doc-card-thumb"
+              aria-label={`Document details for ${doc.title}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                openDetails();
+              }}
+            >
+              {gridThumbInner}
+            </button>
+          ) : href ? (
+            <Link
+              to={href}
+              className="doc-card-thumb"
+              aria-label={`Document details for ${doc.title}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {gridThumbInner}
+            </Link>
+          ) : (
+            <div className="doc-card-thumb" aria-hidden>
+              {gridThumbInner}
+            </div>
+          )}
         </div>
       ) : (
         <div className="doc-card-preview">

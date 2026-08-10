@@ -8,7 +8,8 @@ Canonical rules for how AtlasDocs talks to Paperless-ngx.
   lifecycle.
 - AtlasDocs owns semantic entities and relationships only.
 - Integration is **REST-only**. AtlasDocs never mounts Paperless media, never
-  queries Paperless databases, and never embeds a document viewer.
+  queries Paperless databases, and never embeds the Paperless UI. Same-origin
+  AtlasDocs BFF preview URLs may be shown in an iframe; Paperless itself is not.
 
 ```mermaid
 flowchart LR

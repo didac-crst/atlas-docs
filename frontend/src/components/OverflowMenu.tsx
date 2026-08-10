@@ -9,7 +9,7 @@ type Props = {
 
 type MenuCoords = { top: number; left: number; minWidth: number };
 
-/** Compact overflow / “more” menu; panel is portaled above preview iframes. */
+/** Compact overflow / “more” popover; panel is portaled above preview iframes. */
 export function OverflowMenu({ label = "More actions", children }: Props) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<MenuCoords | null>(null);
@@ -78,7 +78,7 @@ export function OverflowMenu({ label = "More actions", children }: Props) {
         type="button"
         className="btn btn-ghost overflow-menu-trigger"
         aria-expanded={open}
-        aria-haspopup="menu"
+        aria-haspopup="true"
         aria-controls={menuId}
         aria-label={label}
         onClick={() => setOpen((value) => !value)}
@@ -92,7 +92,6 @@ export function OverflowMenu({ label = "More actions", children }: Props) {
               ref={panelRef}
               className="overflow-menu-panel overflow-menu-panel-portal"
               id={menuId}
-              role="menu"
               aria-label={label}
               style={{
                 position: "fixed",

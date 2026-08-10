@@ -439,5 +439,6 @@ def test_clear_completed_ingest_jobs_is_token_scoped(
         assert db.get(IngestionJob, other_id) is not None
         # Clearing history must not delete the Paperless document id we recorded.
         assert paperless_doc_id is not None
+        assert paperless_doc_id in paperless_transport.documents
     finally:
         db.close()

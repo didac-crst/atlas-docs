@@ -13,12 +13,11 @@ type Props = {
 export function FilterChips({ chips, onRemove, onClearAll }: Props) {
   if (chips.length === 0) return null;
   return (
-    <div className="filter-chips" role="list" aria-label="Active filters">
+    <div className="filter-chips" role="group" aria-label="Active filters">
       {chips.map((chip) => (
         <button
           key={chip.id}
           type="button"
-          role="listitem"
           className="filter-chip"
           onClick={() => onRemove(chip.id)}
           aria-label={`Remove filter ${chip.label}`}

@@ -208,7 +208,8 @@ export type ExploreResultItem = {
   document_type: string | null;
   lifecycle_category?: string | null;
   thumbnail_available?: boolean;
-  relationship_count?: number;
+  /** null = unknown (omit from cards); number includes authoritative 0. */
+  relationship_count?: number | null;
 };
 
 export type ExplorePage = {

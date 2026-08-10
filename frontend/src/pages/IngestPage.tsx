@@ -150,8 +150,12 @@ export function IngestPage({ session, onSession }: Props) {
           ? "No completed imports to clear"
           : `Cleared ${result.cleared} completed import${result.cleared === 1 ? "" : "s"} from history`,
       );
-      onSession(await getSession());
       await refreshJobs();
+      try {
+        onSession(await getSession());
+      } catch {
+        setError("Import history was cleared, but session refresh failed.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to clear history");
       try {

@@ -64,9 +64,10 @@ function parseCompleteness(value: string | null): CompletenessFilter {
 }
 
 function parseSort(value: string | null): DocumentSort {
-  if (value === "title" || value === "correspondent" || value === "added" || value === "created") {
+  if (value === "title" || value === "correspondent" || value === "created") {
     return value;
   }
+  // Explore-only "added" is not offered on Classify — keep select and results aligned.
   return "created";
 }
 
@@ -102,8 +103,9 @@ function queueItemToCard(item: QueueItem): ExploreResultItem {
     created_date: item.created_date,
     correspondent: item.correspondent,
     document_type: item.document_type,
-    thumbnail_available: true,
-    relationship_count: 0,
+    thumbnail_available: false,
+    // Queue payload has no relationship data — omit rather than fabricating 0.
+    relationship_count: null,
   };
 }
 
@@ -199,7 +201,13 @@ export function WorkbenchPage({ session, onSession }: Props) {
   }
 
   function writeParams(
-    next: Partial<QueueFilters> & { page?: number; view?: ExploreView; preview?: number | null; preview_title?: string | null },
+    next: Partial<QueueFilters> & {
+      page?: number;
+      view?: ExploreView;
+      preview?: number | null;
+      preview_title?: string | null;
+    },
+    options: { replace?: boolean } = {},
   ) {
     const merged = buildListParams(next);
     const params = new URLSearchParams();
@@ -225,15 +233,15 @@ export function WorkbenchPage({ session, onSession }: Props) {
         next.preview_title === undefined ? previewTitle : next.preview_title;
       if (title && title !== "Document preview") params.set("preview_title", title);
     }
-    setSearchParams(params, { replace: true });
+    setSearchParams(params, { replace: options.replace ?? true });
   }
 
   function openPreview(paperlessDocumentId: number, title: string) {
-    writeParams({ preview: paperlessDocumentId, preview_title: title });
+    writeParams({ preview: paperlessDocumentId, preview_title: title }, { replace: false });
   }
 
   function closePreview() {
-    writeParams({ preview: null, preview_title: null });
+    writeParams({ preview: null, preview_title: null }, { replace: false });
   }
 
   async function reloadQueue() {
@@ -459,6 +467,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
               type="button"
               className="btn btn-secondary atlas-control"
               aria-expanded={filtersOpen}
+              aria-controls="classify-filter-panel"
               onClick={() => setFiltersOpen((value) => !value)}
             >
               <AtlasIcon name="filters" size={16} /> Filters
@@ -488,7 +497,7 @@ export function WorkbenchPage({ session, onSession }: Props) {
           <FilterChips chips={activeChips} onRemove={removeChip} onClearAll={clearAllFilters} />
 
           {filtersOpen ? (
-            <div className="explore-filter-panel">
+            <div className="explore-filter-panel" id="classify-filter-panel">
               <fieldset className="explore-filter-group">
                 <legend>Classification</legend>
                 <div className="explore-filter-grid">
