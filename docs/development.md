@@ -6,7 +6,9 @@ private deployment host, tunnel, or secret store.
 ## Prerequisites
 
 - Python 3.13+
-- Node.js 22+ (frontend and docs checks). The repo pins Node via `.nvmrc`; run `nvm use` when entering the tree.
+- Node.js **22** (frontend, docs checks, Playwright). Pinned in `.nvmrc` and
+  `engines.node`. Always run `nvm use` when entering the tree — other majors
+  (e.g. Homebrew Node 26) can hang Playwright with no useful error.
 - Docker (optional; Compose for PostgreSQL + full stack)
 
 ## Quick start

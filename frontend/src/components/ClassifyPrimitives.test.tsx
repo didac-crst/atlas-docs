@@ -65,9 +65,14 @@ describe("Classify collection primitives", () => {
     const card = screen.getByRole("article");
     expect(card).toHaveAttribute("aria-selected", "false");
     await userEvent.click(card);
-    expect(onToggle).toHaveBeenCalled();
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    await userEvent.keyboard("{Enter}");
+    expect(onToggle).toHaveBeenCalledTimes(2);
+    card.focus();
+    await userEvent.keyboard(" ");
+    expect(onToggle).toHaveBeenCalledTimes(3);
     await userEvent.click(screen.getByRole("button", { name: /^Document details$/i }));
     expect(onPreview).toHaveBeenCalledWith(184, "Payslip Germany");
-    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(onToggle).toHaveBeenCalledTimes(3);
   });
 });

@@ -14,10 +14,13 @@
 
 ## Local commands
 
+Use **Node.js 22** (`nvm use` — see `.nvmrc`). Wrong majors (e.g. Homebrew Node 26) can hang Playwright at webServer startup.
+
 ```bash
+nvm use
 pytest
 cd frontend && npm test && npm run build
-npm run test:e2e
+PLAYWRIGHT_BROWSERS_PATH=$HOME/Library/Caches/ms-playwright npm run test:e2e
 node scripts/check_mermaid.mjs
 node scripts/check_doc_links.mjs
 docker build -t atlasdocs:local .

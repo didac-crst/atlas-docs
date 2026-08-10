@@ -2,6 +2,9 @@
   "name": "atlasdocs-e2e",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "devDependencies": {
     "@playwright/test": "1.52.0",
     "jsdom": "^26.1.0",

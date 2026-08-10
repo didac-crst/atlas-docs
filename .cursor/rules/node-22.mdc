@@ -1,0 +1,18 @@
+---
+description: Always use Node.js 22 for frontend and Playwright
+alwaysApply: true
+---
+
+# Node.js version (AtlasDocs)
+
+This repo pins **Node.js 22** via `.nvmrc`.
+
+Before any `npm`, `npx`, Vitest, Vite, or Playwright command:
+
+1. Run `nvm use` (or otherwise switch to Node 22).
+2. Confirm with `node -v` — it must start with `v22`.
+3. Do **not** use Homebrew Node 26+ (or any major other than 22) for this project.
+
+Playwright under the wrong Node version can hang at webServer startup with no useful error. If that happens, stop and fix the Node version — do not retry indefinitely.
+
+Also use the project `.venv` Python for uvicorn/e2e (`playwright.config.ts` already prefers `.venv/bin/python`).

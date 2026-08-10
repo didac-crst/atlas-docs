@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.4.0",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build && rm -rf ../src/atlasdocs/ui/spa && mkdir -p ../src/atlasdocs/ui/spa && cp -R dist/. ../src/atlasdocs/ui/spa/ && touch ../src/atlasdocs/ui/spa/.gitkeep",

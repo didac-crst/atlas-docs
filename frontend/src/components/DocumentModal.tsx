@@ -69,6 +69,7 @@ export function DocumentModal({
         const type = response.headers.get("content-type") || "";
         // Headers are enough — do not download the full PDF body for the probe.
         await response.body?.cancel();
+        if (cancelled) return;
         if (!type.startsWith("application/pdf") && !type.startsWith("image/")) {
           setStatus("error");
           return;
@@ -87,6 +88,7 @@ export function DocumentModal({
 
   useEffect(() => {
     let cancelled = false;
+    setDocument(null);
     (async () => {
       setDetailLoading(true);
       try {
@@ -268,7 +270,7 @@ export function DocumentModal({
                             Provenance: {rel.origin} · Status: {rel.status}
                           </div>
                         </div>
-                        {editable ? (
+                        {editable && csrfToken ? (
                           <button
                             type="button"
                             className="btn btn-danger"
