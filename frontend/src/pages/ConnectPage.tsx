@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { connect, login, type SessionInfo } from "../api/client";
+import { PageLayout } from "../components/PageLayout";
 import { ProductIdentity } from "../components/ProductIdentity";
 
 type Props = {
@@ -48,6 +49,7 @@ export function ConnectPage({ session, onConnected }: Props) {
 
   if (session?.authenticated) {
     return (
+      <PageLayout width="narrow">
       <section className="panel connect-panel" aria-labelledby="connect-title">
         <ProductIdentity titleId="connect-title" size="md" />
         <p className="muted">
@@ -93,10 +95,12 @@ export function ConnectPage({ session, onConnected }: Props) {
           </form>
         </details>
       </section>
+      </PageLayout>
     );
   }
 
   return (
+    <PageLayout width="narrow">
     <section className="panel connect-panel" aria-labelledby="connect-title">
       <ProductIdentity titleId="connect-title" size="lg" />
       {error ? (
@@ -159,5 +163,6 @@ export function ConnectPage({ session, onConnected }: Props) {
         </form>
       </details>
     </section>
+    </PageLayout>
   );
 }

@@ -185,10 +185,32 @@ class _StreamingBytes:
         self._response = response
         self._client = client
         self._closed = False
+        self._raw = response.iter_bytes()
+        self._prefix: bytes | None = None
+
+    def peek(self, size: int = 8) -> bytes:
+        """Read a small prefix for content sniffing without logging the body."""
+        if self._prefix is not None:
+            return self._prefix[:size]
+        buf = bytearray()
+        try:
+            while len(buf) < size:
+                chunk = next(self._raw)
+                if not chunk:
+                    break
+                buf.extend(chunk)
+        except StopIteration:
+            pass
+        self._prefix = bytes(buf)
+        return self._prefix[:size]
 
     def __iter__(self) -> Iterator[bytes]:
         try:
-            yield from self._response.iter_bytes()
+            if self._prefix is None:
+                self.peek()
+            if self._prefix:
+                yield self._prefix
+            yield from self._raw
         finally:
             self.close()
 
@@ -198,6 +220,17 @@ class _StreamingBytes:
         self._closed = True
         self._response.close()
         self._client.close()
+
+
+def _normalize_stream_content_type(content_type: str, stream: _StreamingBytes) -> str:
+    """Map ambiguous upstream types to PDF when magic bytes match (no body logging)."""
+    media = (content_type or "application/octet-stream").split(";")[0].strip().lower()
+    if media in {"application/pdf", "application/x-pdf"}:
+        return "application/pdf"
+    if media in {"application/octet-stream", "binary/octet-stream", ""}:
+        if stream.peek(5).startswith(b"%PDF"):
+            return "application/pdf"
+    return content_type
 
 
 class PaperlessClient:
@@ -650,7 +683,11 @@ class PaperlessClient:
         original: bool = False,
         version: int | None = None,
     ) -> tuple[Iterator[bytes], str, str | None]:
-        """Stream preview or download bytes from Paperless without logging the body."""
+        """Stream preview or download bytes from Paperless without logging the body.
+
+        Never follows redirects: a Paperless 302/401 login bounce must not become
+        HTML served inside AtlasDocs. Body bytes are never logged.
+        """
         suffix = "preview" if kind == "preview" else "download"
         params: dict[str, str] = {}
         if original:
@@ -659,7 +696,12 @@ class PaperlessClient:
             params["version"] = str(int(version))
         query = f"?{urlencode(params)}" if params else ""
         url = f"{self._base_url}/api/documents/{document_id}/{suffix}/{query}"
-        client = httpx.Client(timeout=self._timeout, transport=self._transport)
+        # follow_redirects=False: do not chase Paperless UI / auth redirects.
+        client = httpx.Client(
+            timeout=self._timeout,
+            transport=self._transport,
+            follow_redirects=False,
+        )
         try:
             response = client.send(
                 client.build_request("GET", url, headers=self._headers(token)),
@@ -680,18 +722,21 @@ class PaperlessClient:
             response.close()
             client.close()
             raise PaperlessNotFoundError(f"Paperless document {document_id} not found")
-        if response.status_code >= 500:
+        if response.status_code in {301, 302, 303, 307, 308}:
             response.close()
             client.close()
             raise PaperlessUnavailableError(f"Paperless returned HTTP {response.status_code}")
-        if response.status_code >= 400:
+        if response.status_code < 200 or response.status_code >= 300:
             response.close()
             client.close()
             raise PaperlessUnavailableError(f"Paperless returned HTTP {response.status_code}")
 
         content_type = response.headers.get("content-type") or "application/octet-stream"
         filename = _filename_from_content_disposition(response.headers.get("content-disposition"))
-        return _StreamingBytes(response, client), content_type, filename
+        stream = _StreamingBytes(response, client)
+        # Peek magic bytes only (never log) so octet-stream PDFs still preview.
+        content_type = _normalize_stream_content_type(content_type, stream)
+        return stream, content_type, filename
 
     def document_exists(self, document_id: int, token: str) -> bool:
         self.get_document(document_id, token=token)

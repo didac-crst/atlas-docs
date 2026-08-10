@@ -128,10 +128,64 @@ def test_preview_rejects_non_image_non_pdf(
     client: TestClient, paperless_transport: FakePaperlessTransport
 ) -> None:
     paperless_transport.preview_content_type = "application/octet-stream"
+    # Force non-PDF bytes so octet-stream cannot be sniffed as PDF.
+    paperless_transport.documents[184]["title"] = "Payslip Germany"
     _connect(client)
+    # Override transport content to non-PDF by using a custom content type with
+    # fake body that does not start with %PDF — patch via status won't help;
+    # instead set content type to text/plain which is clearly unsupported.
+    paperless_transport.preview_content_type = "text/plain"
     response = client.get("/ui/api/documents/184/preview")
     assert response.status_code == 415
     assert response.json()["detail"] == "Preview is only available for PDF and raster images"
+
+
+def test_preview_sniffs_pdf_from_octet_stream(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    paperless_transport.preview_content_type = "application/octet-stream"
+    _connect(client)
+    response = client.get("/ui/api/documents/184/preview")
+    assert response.status_code == 200
+    assert response.headers.get("content-type", "").startswith("application/pdf")
+    assert response.headers.get("content-disposition", "").startswith("inline;")
+    assert response.content.startswith(b"%PDF")
+
+
+def test_paperless_redirect_on_preview_is_safe_502(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    paperless_transport.preview_status_code = 302
+    _connect(client)
+    response = client.get("/ui/api/documents/184/preview")
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Upstream document unavailable"
+    assert "accounts/login" not in response.text
+    assert "bff-content-token" not in response.text
+    for value in response.headers.values():
+        assert "bff-content-token" not in value
+        assert "Token " not in value
+
+
+def test_paperless_403_on_preview_is_safe_404(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    paperless_transport.denied.add(184)
+    _connect(client)
+    response = client.get("/ui/api/documents/184/preview")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Document not found"
+    assert "bff-content-token" not in response.text
+
+
+def test_paperless_404_on_preview_is_safe(
+    client: TestClient, paperless_transport: FakePaperlessTransport
+) -> None:
+    del paperless_transport.documents[184]
+    _connect(client)
+    response = client.get("/ui/api/documents/184/preview")
+    assert response.status_code == 404
+    assert "bff-content-token" not in response.text
 
 
 def test_fake_preview_download_require_authorization(

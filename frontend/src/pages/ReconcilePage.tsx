@@ -6,6 +6,7 @@ import {
   type ReconcileSummary,
   type SessionInfo,
 } from "../api/client";
+import { PageLayout } from "../components/PageLayout";
 
 type Props = {
   session: SessionInfo;
@@ -53,6 +54,7 @@ export function ReconcilePage({ session, onSession }: Props) {
   }
 
   return (
+    <PageLayout width="standard">
     <section className="panel" aria-labelledby="reconcile-title">
       <h1 id="reconcile-title">
         <GitBranch size={20} aria-hidden /> Reconciliation
@@ -103,11 +105,11 @@ export function ReconcilePage({ session, onSession }: Props) {
             {summary.missing_in_paperless.length === 0 ? (
               <p className="empty">None</p>
             ) : (
-              <ul>
-                {summary.missing_in_paperless.map((id) => (
-                  <li key={id}>{id}</li>
-                ))}
-              </ul>
+              <p>
+                {summary.missing_in_paperless.length} document
+                {summary.missing_in_paperless.length === 1 ? "" : "s"} referenced in AtlasDocs but
+                missing upstream.
+              </p>
             )}
           </div>
           <div>
@@ -115,17 +117,48 @@ export function ReconcilePage({ session, onSession }: Props) {
             {summary.inaccessible_in_paperless.length === 0 ? (
               <p className="empty">None</p>
             ) : (
-              <ul>
-                {summary.inaccessible_in_paperless.map((id) => (
-                  <li key={id}>{id}</li>
-                ))}
-              </ul>
+              <p>
+                {summary.inaccessible_in_paperless.length} document
+                {summary.inaccessible_in_paperless.length === 1 ? "" : "s"} could not be read with
+                the current credentials.
+              </p>
             )}
           </div>
+          {(summary.missing_in_paperless.length > 0 ||
+            summary.inaccessible_in_paperless.length > 0) && (
+            <details className="tech-details">
+              <summary>Technical identifiers</summary>
+              {summary.missing_in_paperless.length > 0 ? (
+                <div>
+                  <h3>Missing</h3>
+                  <ul>
+                    {summary.missing_in_paperless.map((id) => (
+                      <li key={`missing-${id}`}>
+                        <code>{id}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {summary.inaccessible_in_paperless.length > 0 ? (
+                <div>
+                  <h3>Inaccessible</h3>
+                  <ul>
+                    {summary.inaccessible_in_paperless.map((id) => (
+                      <li key={`inaccessible-${id}`}>
+                        <code>{id}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </details>
+          )}
         </div>
       ) : (
         <p className="empty">Run reconciliation to see creates and missing/inaccessible references.</p>
       )}
     </section>
+    </PageLayout>
   );
 }

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from atlasdocs import __version__
@@ -24,6 +25,11 @@ def create_app() -> FastAPI:
     static_dir = Path(__file__).resolve().parent.parent / "ui" / "static"
     if static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    @app.get("/")
+    def root() -> RedirectResponse:
+        """Send bare host roots into the SPA shell; auth routing stays under /ui."""
+        return RedirectResponse(url="/ui", status_code=307)
 
     @app.get("/health")
     def health() -> dict[str, str]:

@@ -8,7 +8,8 @@ Canonical rules for how AtlasDocs talks to Paperless-ngx.
   lifecycle.
 - AtlasDocs owns semantic entities and relationships only.
 - Integration is **REST-only**. AtlasDocs never mounts Paperless media, never
-  queries Paperless databases, and never embeds a document viewer.
+  queries Paperless databases, and never embeds the Paperless UI. Same-origin
+  AtlasDocs BFF preview URLs may be shown in an iframe; Paperless itself is not.
 
 ```mermaid
 flowchart LR
@@ -155,7 +156,7 @@ Paperless token:
 
 | Route | Behavior |
 | --- | --- |
-| `GET /ui/api/documents/{id}/preview` | Stream PDF/raster image (`Cache-Control: no-store`; SVG rejected). Detail UI embeds this inline; “Open preview in new tab” remains available. |
+| `GET /ui/api/documents/{id}/preview` | Stream PDF/raster image (`Content-Disposition: inline`, `Cache-Control: no-store`; SVG rejected; upstream redirects not followed). Detail UI embeds this same-origin URL in an iframe; “Open preview in new tab” remains available. Never iframes the Paperless UI. |
 | `GET /ui/api/documents/{id}/download` | Stream bytes as attachment |
 
 Both require an authenticated UI session. AtlasDocs checks Paperless access

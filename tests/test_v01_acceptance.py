@@ -29,6 +29,12 @@ def test_health(client: TestClient) -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_root_redirects_to_ui(client: TestClient) -> None:
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/ui"
+
+
 def test_authorization_required(client: TestClient) -> None:
     assert client.get("/documents/184").status_code == 401
     assert (

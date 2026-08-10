@@ -983,6 +983,27 @@ def list_ingest_jobs(
     return _json_with_session(body, ui_session)
 
 
+@api_router.post("/ingest/jobs/clear-completed")
+def clear_completed_ingest_jobs(
+    request: Request,
+    x_csrf_token: str | None = Header(default=None, alias=CSRF_HEADER),
+    db: Session = Depends(get_db),
+    service: IngestionService = Depends(get_ui_ingest_service),
+) -> JSONResponse:
+    """Clear this user's completed import history only — never deletes documents."""
+    ui_session, auth = _require_ui_auth(request, db)
+    if not _validate_csrf(ui_session.csrf_token, x_csrf_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CSRF token")
+    try:
+        cleared = service.clear_completed_jobs(auth)
+        store = DbSessionStore(db)
+        if not store.rotate_csrf(ui_session):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    except _DOMAIN_ERRORS as exc:
+        raise _to_http_error(exc) from exc
+    return _json_with_session({"cleared": cleared}, ui_session)
+
+
 @api_router.get("/ingest/jobs/{job_id}", response_model=IngestionJobResponse)
 def get_ingest_job(
     request: Request,
@@ -1017,6 +1038,8 @@ def retry_ingest_job(
     except _DOMAIN_ERRORS as exc:
         raise _to_http_error(exc) from exc
     return _json_with_session(_serialize_job(job), ui_session)
+
+
 
 
 @api_router.delete("/documents/{paperless_document_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1177,13 +1200,20 @@ def _stream_paperless_document(
             detail="Preview is only available for PDF and raster images",
         )
 
+    # Same-origin iframe needs an explicit inline PDF/image type — never forward
+    # Paperless/Cloudflare framing headers; AtlasDocs sets its own safe headers.
+    if media in {"application/pdf", "application/x-pdf"}:
+        response_media = "application/pdf"
+    else:
+        response_media = media or "application/octet-stream"
+
     safe_name = _safe_download_filename(filename, f"document-{paperless_document_id}")
     headers = {
         "Cache-Control": "no-store",
         "Content-Disposition": f'{disposition}; filename="{safe_name}"',
         "X-Content-Type-Options": "nosniff",
     }
-    return StreamingResponse(chunks, media_type=content_type or "application/octet-stream", headers=headers)
+    return StreamingResponse(chunks, media_type=response_media, headers=headers)
 
 
 @api_router.get("/documents/{paperless_document_id}/preview")
@@ -1283,12 +1313,19 @@ def spa_root() -> Response:
 
 
 @router.get("/connect")
+@router.get("/about")
+@router.get("/explore")
 @router.get("/reconcile")
 @router.get("/classify")
 @router.get("/ingest")
 @router.get("/documents/{paperless_document_id}")
-def spa_client_routes(paperless_document_id: int | None = None) -> Response:
+@router.get("/entities/{entity_id}")
+def spa_client_routes(
+    paperless_document_id: int | None = None,
+    entity_id: str | None = None,
+) -> Response:
     _ = paperless_document_id
+    _ = entity_id
     return spa_index_response()
 
 

@@ -1,8 +1,9 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { FilePlus2 } from "lucide-react";
 import {
   ApiError,
+  clearCompletedIngestJobs,
   fetchIngestJobs,
   getSession,
   ingestDocument,
@@ -11,6 +12,7 @@ import {
   type IngestJob,
   type SessionInfo,
 } from "../api/client";
+import { PageLayout } from "../components/PageLayout";
 
 type Props = {
   session: SessionInfo;
@@ -137,7 +139,39 @@ export function IngestPage({ session, onSession }: Props) {
     }
   }
 
+  async function onClearCompleted() {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await clearCompletedIngestJobs(session.csrf_token);
+      setNotice(
+        result.cleared === 0
+          ? "No completed imports to clear"
+          : `Cleared ${result.cleared} completed import${result.cleared === 1 ? "" : "s"} from history`,
+      );
+      await refreshJobs();
+      try {
+        onSession(await getSession());
+      } catch {
+        setError("Import history was cleared, but session refresh failed.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to clear history");
+      try {
+        onSession(await getSession());
+      } catch {
+        /* ignore */
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const completedCount = jobs.filter((job) => job.state === "READY" || job.state === "FAILED").length;
+
   return (
+    <PageLayout width="standard">
     <div className="ingest-layout">
       <section className="panel" aria-labelledby="ingest-title">
         <h1 id="ingest-title">
@@ -183,11 +217,26 @@ export function IngestPage({ session, onSession }: Props) {
       </section>
 
       <section className="panel" aria-labelledby="jobs-title">
-        <h1 id="jobs-title">Ingestion jobs</h1>
+        <div className="ingest-history-header">
+          <div>
+            <h1 id="jobs-title">Recent imports</h1>
+            <p className="muted">
+              Your import history for this account. Clearing history does not delete documents.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary atlas-control"
+            disabled={busy || completedCount === 0}
+            onClick={() => void onClearCompleted()}
+          >
+            Clear completed
+          </button>
+        </div>
         {loading && jobs.length === 0 ? (
-          <p role="status">Loading jobs…</p>
+          <p role="status">Loading imports…</p>
         ) : jobs.length === 0 ? (
-          <p className="empty">No ingestion jobs yet.</p>
+          <p className="empty">No recent imports yet.</p>
         ) : (
           <div className="job-table-wrap">
             <table className="job-table">
@@ -196,7 +245,7 @@ export function IngestPage({ session, onSession }: Props) {
                   <th scope="col">File</th>
                   <th scope="col">State</th>
                   <th scope="col">Updated</th>
-                  <th scope="col">Paperless</th>
+                  <th scope="col">Document</th>
                   <th scope="col">Error</th>
                   <th scope="col">Actions</th>
                 </tr>
@@ -213,8 +262,12 @@ export function IngestPage({ session, onSession }: Props) {
                     <td className="muted" style={{ fontVariantNumeric: "tabular-nums" }}>
                       {formatTimestamp(job.updated_at)}
                     </td>
-                    <td style={{ fontVariantNumeric: "tabular-nums" }}>
-                      {job.paperless_document_id ?? "—"}
+                    <td>
+                      {job.paperless_document_id != null ? (
+                        <Link to={`/documents/${job.paperless_document_id}`}>Open</Link>
+                      ) : (
+                        <span className="muted">Pending</span>
+                      )}
                     </td>
                     <td className="muted">
                       {job.error_message || job.error_code || "—"}
@@ -246,6 +299,7 @@ export function IngestPage({ session, onSession }: Props) {
         )}
       </section>
     </div>
+    </PageLayout>
   );
 }
 
